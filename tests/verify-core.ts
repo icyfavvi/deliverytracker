@@ -3,6 +3,7 @@ import {
   obtenerPedidoPorCodigo,
   crearPedido,
   avanzarEstado,
+  vaciarPedidos,
   resetearSemilla,
 } from "../src/services/pedidosApi";
 
@@ -19,7 +20,7 @@ async function runTests() {
 
   // 1. Resetear y verificar inicio limpio (0 órdenes precargadas)
   console.log("1. Verificando inicio limpio (almacén sin órdenes precargadas):");
-  await resetearSemilla();
+  await vaciarPedidos();
   const resInicial = await obtenerPedidos();
   assert(resInicial.status === 200, "obtenerPedidos retorna status 200");
   assert(Array.isArray(resInicial.data), "data es un Array");

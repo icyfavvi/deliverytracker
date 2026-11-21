@@ -32,7 +32,7 @@ import { Masthead } from "../components/Masthead";
 import { PedidoCard } from "../components/PedidoCard";
 import { usePedidos } from "../context/PedidosContext";
 import { usePedidoPolling } from "../hooks/usePedidoPolling";
-import { resetearSemilla } from "../services/pedidosApi";
+import { vaciarPedidos } from "../services/pedidosApi";
 import { useTema } from "../theme/ThemeProvider";
 import { BREAKPOINTS, ESPACIOS, RADIOS, sombraTarjeta } from "../theme/tokens";
 import { ItemPedido, Pedido } from "../types/pedido";
@@ -318,9 +318,9 @@ export function LocalScreen() {
     });
   }, []);
 
-  // ─── Resetear / vaciar datos de despacho ─────────────────────
-  const handleResetearDemo = useCallback(async () => {
-    await resetearSemilla();
+  // ─── Vaciar datos de despacho ───────────────────────────────
+  const handleVaciarOrdenes = useCallback(async () => {
+    await vaciarPedidos();
     await recargar();
     setAviso({
       titulo: "Lista de pedidos vaciada",
@@ -619,7 +619,7 @@ export function LocalScreen() {
         acciones={
           estadisticas.total > 0 ? (
             <Pressable
-              onPress={handleResetearDemo}
+              onPress={handleVaciarOrdenes}
               accessibilityRole="button"
               accessibilityLabel="Vaciar las órdenes registradas"
               style={({ pressed }) => [

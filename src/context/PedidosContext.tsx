@@ -95,29 +95,12 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // ─── Carga inicial ────────────────────────────────────────────
+  // ─── Carga inicial (reutiliza recargar sin duplicar lógica) ────
   useEffect(() => {
     let cancelado = false;
-    (async () => {
+    const inicializar = async () => {
       try {
-        const res = await obtenerPedidos();
-        if (cancelado) return;
-        if (!res.ok) {
-          setEstado({
-            tipo: "error",
-            mensaje: `Error al conectar con la base de datos (${res.status}).`,
-          });
-          return;
-        }
-        if (res.data.length === 0) {
-          setEstado({ tipo: "vacio" });
-        } else {
-          const ordenados = [...res.data].sort(
-            (a, b) =>
-              new Date(b.actualizadoEn).getTime() - new Date(a.actualizadoEn).getTime()
-          );
-          setEstado({ tipo: "datos", datos: ordenados });
-        }
+        await recargar();
       } catch {
         if (!cancelado) {
           setEstado({
@@ -126,12 +109,12 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
           });
         }
       }
-    })();
-
+    };
+    inicializar();
     return () => {
       cancelado = true;
     };
-  }, []);
+  }, [recargar]);
 
   const crearOrden = useCallback(
     async (

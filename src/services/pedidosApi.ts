@@ -255,8 +255,8 @@ export async function avanzarEstado(
   return respuesta(200, actualizado);
 }
 
-/** Resetear datos y vaciar todas las órdenes */
-export async function resetearSemilla(): Promise<ApiResponse<Pedido[]>> {
+/** Vaciar todas las órdenes y resetear el almacén en blanco */
+export async function vaciarPedidos(): Promise<ApiResponse<Pedido[]>> {
   if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.removeItem(STORAGE_KEY);
   }
@@ -264,3 +264,6 @@ export async function resetearSemilla(): Promise<ApiResponse<Pedido[]>> {
   guardarEnStorage({});
   return respuesta(200, []);
 }
+
+/** Alias para compatibilidad con código existente */
+export const resetearSemilla = vaciarPedidos;
