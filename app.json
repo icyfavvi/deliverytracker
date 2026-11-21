@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Atelier Noir",
+    "slug": "deliverytracker",
+    "scheme": "ateliernoir",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#F4F1EB",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "cl.ateliernoir.deliverytracker"
+    },
+    "android": {
+      "package": "cl.ateliernoir.deliverytracker",
+      "adaptiveIcon": {
+        "backgroundColor": "#F4F1EB",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "@react-native-vector-icons/lucide",
+      "expo-font",
+      "expo-splash-screen"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

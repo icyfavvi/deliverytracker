@@ -1,0 +1,277 @@
+// ─── Tarjeta de pedido (vista de bodega) ─────────────────────────
+//
+// Tarjeta densa pero escaneable: la orden y su estado arriba, el
+// destinatario al medio, el contenido y el total abajo, y una única
+// acción primaria (avanzar el estado).
+
+import React from "react";
+import { StyleSheet, Text, View } from "react-native";
+
+import { EstadoPedidoBadge } from "./EstadoPedidoBadge";
+import { Icon } from "./Icon";
+import { useTema } from "../theme/ThemeProvider";
+import { ESPACIOS, RADIOS, sombraTarjeta } from "../theme/tokens";
+import {
+  ETIQUETAS_ESTADO,
+  FLUJO_ESTADOS,
+  Pedido,
+} from "../types/pedido";
+import { Boton } from "./Boton";
+
+interface Props {
+  pedido: Pedido;
+  onAvanzarEstado: (codigo: string) => void;
+  onCopiarCodigo?: (codigo: string) => void;
+}
+
+export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
+  const { colores, tipografia, modo } = useTema();
+  const indiceActual = FLUJO_ESTADOS.indexOf(pedido.estado);
+  const esUltimoEstado = indiceActual === FLUJO_ESTADOS.length - 1;
+  const siguienteEstado = esUltimoEstado ? null : FLUJO_ESTADOS[indiceActual + 1];
+
+  const formatearPrecio = (valor: number) =>
+    "$" + valor.toLocaleString("es-CL");
+
+  // El botón de avance se pinta con el color del estado siguiente.
+  // Ese color lo decide el tema, así que no hay que ajustar nada aquí.
+
+  return (
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: colores.superficie,
+          borderColor: colores.borde,
+          borderRadius: RADIOS.lg,
+        },
+        sombraTarjeta(modo),
+      ]}
+    >
+      {/* Encabezado: orden + estado */}
+      <View style={styles.encabezado}>
+        <View style={styles.bloqueCodigo}>
+          <Text style={[tipografia.eyebrowMono, styles.eyebrow, { color: colores.tintaTerciaria }]}>
+            ORDEN
+          </Text>
+          <Text style={[tipografia.codigo, styles.codigo, { color: colores.tinta }]}>
+            #{pedido.codigo}
+          </Text>
+        </View>
+        <EstadoPedidoBadge estado={pedido.estado} compacto />
+      </View>
+
+      {/* Destinatario */}
+      <View style={styles.bloqueCliente}>
+        <View style={styles.lineaDato}>
+          <Icon name="user" size={14} color={colores.tintaTerciaria} />
+          <Text
+            style={[tipografia.cuerpoFuerte, styles.textoDato, { color: colores.tinta }]}
+            numberOfLines={1}
+          >
+            {pedido.clienteNombre}
+          </Text>
+        </View>
+        <View style={styles.lineaDato}>
+          <Icon name="map-pin" size={14} color={colores.tintaTerciaria} />
+          <Text
+            style={[tipografia.caption, styles.textoDato, { color: colores.tintaSecundaria }]}
+            numberOfLines={2}
+          >
+            {pedido.direccionDespacho}, {pedido.comuna}
+          </Text>
+        </View>
+        <View style={styles.lineaDato}>
+          <Icon name="truck" size={14} color={colores.acento} />
+          <Text style={[tipografia.caption, styles.textoDato, { color: colores.acento }]}>
+            {pedido.metodoEnvio}
+          </Text>
+        </View>
+      </View>
+
+      {/* Contenido del paquete */}
+      <View
+        style={[
+          styles.panel,
+          { backgroundColor: colores.superficieHundida, borderRadius: RADIOS.md },
+        ]}
+      >
+        <Text style={[tipografia.micro, styles.eyebrow, { color: colores.tintaTerciaria }]}>
+          PRENDAS ({pedido.items.length})
+        </Text>
+
+        {pedido.items.map((item, i) => (
+          <View key={`${item.nombre}-${i}`} style={styles.itemFila}>
+            <View style={styles.itemDetalle}>
+              <Text
+                style={[tipografia.etiqueta, styles.itemNombre, { color: colores.tinta }]}
+                numberOfLines={1}
+              >
+                {item.cantidad}× {item.nombre}
+              </Text>
+              {(item.talla || item.color) && (
+                <Text style={[tipografia.caption, { color: colores.tintaSecundaria }]}>
+                  {[item.talla ? `Talla ${item.talla}` : null, item.color]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+              )}
+            </View>
+            {item.precioUnitario ? (
+              <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
+                {formatearPrecio(item.precioUnitario * item.cantidad)}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+
+        <View style={[styles.totalFila, { borderTopColor: colores.borde }]}>
+          <Text style={[tipografia.etiqueta, { color: colores.tintaSecundaria }]}>
+            Total
+          </Text>
+          <Text style={[tipografia.subtitulo, { color: colores.tinta }]}>
+            {formatearPrecio(pedido.totalEstimado ?? 0)}
+          </Text>
+        </View>
+      </View>
+
+      {/* Acción primaria */}
+      {!esUltimoEstado && siguienteEstado ? (
+        <Boton
+          etiqueta={`Avanzar a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
+          iconoDerecha="arrow-right"
+          onPress={() => onAvanzarEstado(pedido.codigo)}
+          style={[
+            styles.botonAvanzar,
+            {
+              backgroundColor: colores.estado[siguienteEstado],
+              borderRadius: RADIOS.md,
+            },
+          ]}
+          accessibilityLabel={`Avanzar pedido ${pedido.codigo} a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
+          accessibilityHint="Cambia el estado del despacho en el servidor"
+        />
+      ) : (
+        <View
+          style={[
+            styles.selloEntregado,
+            {
+              backgroundColor: colores.estadoSuave.entregado,
+              borderRadius: RADIOS.md,
+            },
+          ]}
+        >
+          <Icon name="circle-check" size={16} color={colores.estado.entregado} />
+          <Text
+            style={[tipografia.etiqueta, { color: colores.estado.entregado }]}
+          >
+            Despacho completado
+          </Text>
+        </View>
+      )}
+
+      {/* Pie */}
+      <View style={styles.pie}>
+        <Text style={[tipografia.caption, { color: colores.tintaTerciaria }]}>
+          Actualizado{" "}
+          {new Date(pedido.actualizadoEn).toLocaleTimeString("es-CL", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </Text>
+        {onCopiarCodigo ? (
+          <Boton
+            etiqueta="Copiar código"
+            icono="copy"
+            variante="fantasma"
+            compacto
+            onPress={() => onCopiarCodigo(pedido.codigo)}
+            accessibilityLabel={`Copiar el código ${pedido.codigo}`}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    padding: ESPACIOS.lg,
+    marginBottom: ESPACIOS.md,
+    borderWidth: 1,
+  },
+  encabezado: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
+  },
+  bloqueCodigo: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: ESPACIOS.sm,
+  },
+  eyebrow: {
+    letterSpacing: 1.3,
+  },
+  codigo: {
+    letterSpacing: 1,
+  },
+  bloqueCliente: {
+    marginTop: ESPACIOS.md,
+    gap: ESPACIOS.xs + 2,
+  },
+  lineaDato: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: ESPACIOS.sm,
+  },
+  textoDato: {
+    flex: 1,
+    minWidth: 0,
+  },
+  panel: {
+    marginTop: ESPACIOS.md,
+    padding: ESPACIOS.md,
+    gap: ESPACIOS.sm,
+  },
+  itemFila: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
+  },
+  itemDetalle: {
+    flex: 1,
+    minWidth: 0,
+  },
+  itemNombre: {
+    marginBottom: 1,
+  },
+  totalFila: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderTopWidth: 1,
+    paddingTop: ESPACIOS.sm,
+    marginTop: ESPACIOS.xs,
+  },
+  botonAvanzar: {
+    marginTop: ESPACIOS.md,
+  },
+  selloEntregado: {
+    marginTop: ESPACIOS.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: ESPACIOS.sm,
+    paddingVertical: ESPACIOS.md,
+  },
+  pie: {
+    marginTop: ESPACIOS.sm,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
+  },
+});
