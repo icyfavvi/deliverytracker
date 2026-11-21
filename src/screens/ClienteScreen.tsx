@@ -213,6 +213,7 @@ export function ClienteScreen() {
           <Masthead
             eyebrow="Atelier Noir · Seguimiento de compra"
             titulo="Rastrea tu despacho"
+            variante="tecnico"
             descripcion="Ingresa tu código de 4 caracteres para ver el estado de preparación y despacho de tus prendas en tiempo real."
             acciones={<InterruptorTema />}
           />
@@ -338,7 +339,7 @@ export function ClienteScreen() {
                     <View style={styles.tarjetaHeaderTexto}>
                       <Text
                         style={[
-                          tipografia.micro,
+                          tipografia.eyebrowMono,
                           styles.eyebrow,
                           { color: colores.tintaTerciaria },
                         ]}
@@ -382,7 +383,7 @@ export function ClienteScreen() {
                   >
                     <Text
                       style={[
-                        tipografia.eyebrow,
+                        tipografia.eyebrowMono,
                         styles.seccionTitulo,
                         { color: colores.tintaTerciaria },
                       ]}
@@ -425,7 +426,7 @@ export function ClienteScreen() {
                   >
                     <Text
                       style={[
-                        tipografia.eyebrow,
+                        tipografia.eyebrowMono,
                         styles.seccionTitulo,
                         { color: colores.tintaTerciaria },
                       ]}
