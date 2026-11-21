@@ -66,16 +66,8 @@ export function LocalScreen() {
   // ─── Estado del formulario de despacho ─────────────────────────
   const [nombre, setNombre] = useState("");
   const [direccion, setDireccion] = useState("");
-  const [comuna, setComuna] = useState("Providencia, Santiago");
-  const [items, setItems] = useState<ItemPedido[]>([
-    {
-      nombre: PRENDAS_CATALOGO[0].nombre,
-      cantidad: 1,
-      talla: PRENDAS_CATALOGO[0].talla,
-      color: PRENDAS_CATALOGO[0].color,
-      precioUnitario: PRENDAS_CATALOGO[0].precio,
-    },
-  ]);
+  const [comuna, setComuna] = useState("");
+  const [items, setItems] = useState<ItemPedido[]>([]);
   const [itemNombreManual, setItemNombreManual] = useState("");
   const [tallaManual, setTallaManual] = useState(TALLA_PREDETERMINADA);
   const [creando, setCreando] = useState(false);
@@ -274,15 +266,8 @@ export function LocalScreen() {
       const codigo = resultado.codigo ?? "";
       setNombre("");
       setDireccion("");
-      setItems([
-        {
-          nombre: PRENDAS_CATALOGO[0].nombre,
-          cantidad: 1,
-          talla: PRENDAS_CATALOGO[0].talla,
-          color: PRENDAS_CATALOGO[0].color,
-          precioUnitario: PRENDAS_CATALOGO[0].precio,
-        },
-      ]);
+      setComuna("");
+      setItems([]);
       setAviso({
         titulo: `Orden #${codigo} creada`,
         mensaje: "Ya está visible para el cliente en el rastreo.",

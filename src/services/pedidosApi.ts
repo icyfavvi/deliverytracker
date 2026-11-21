@@ -13,12 +13,14 @@ import {
 } from "../types/pedido";
 import { CONFIG } from "../constants/config";
 
-const STORAGE_KEY = "deliverytracker_pedidos_v2";
+const STORAGE_KEY = "deliverytracker_pedidos_v3";
 
-// Limpiar versiones anteriores con órdenes de ejemplo
+// Limpiar versiones anteriores y cualquier orden previa para garantizar inicio limpio en blanco
 if (typeof window !== "undefined" && window.localStorage) {
   try {
     window.localStorage.removeItem("deliverytracker_pedidos_v1");
+    window.localStorage.removeItem("deliverytracker_pedidos_v2");
+    window.localStorage.removeItem("deliverytracker_pedidos_v3");
   } catch {}
 }
 
