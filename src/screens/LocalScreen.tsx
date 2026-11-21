@@ -333,13 +333,13 @@ export function LocalScreen() {
     });
   }, []);
 
-  // ─── Resetear datos demo ──────────────────────────────────────
+  // ─── Resetear / vaciar datos de despacho ─────────────────────
   const handleResetearDemo = useCallback(async () => {
     await resetearSemilla();
     await recargar();
     setAviso({
-      titulo: "Datos demo restablecidos",
-      mensaje: "Volvimos a las órdenes CLO1 y MOD2.",
+      titulo: "Lista de pedidos vaciada",
+      mensaje: "Se eliminaron todas las órdenes registradas.",
       tono: "info",
     });
   }, [recargar]);
@@ -626,23 +626,29 @@ export function LocalScreen() {
         eyebrow="Monitor de courier"
         titulo="Órdenes de envío"
         variante="tecnico"
-        descripcion={`${estadisticas.activos} en ruta · ${estadisticas.entregados} entregadas de ${estadisticas.total} órdenes.`}
+        descripcion={
+          estadisticas.total === 0
+            ? "Sin órdenes activas en este momento."
+            : `${estadisticas.activos} en ruta · ${estadisticas.entregados} entregadas de ${estadisticas.total} órdenes.`
+        }
         acciones={
-          <Pressable
-            onPress={handleResetearDemo}
-            accessibilityRole="button"
-            accessibilityLabel="Reiniciar los datos demo"
-            style={({ pressed }) => [
-              styles.botonIcono,
-              {
-                borderColor: colores.borde,
-                backgroundColor: colores.superficie,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <Icon name="rotate-ccw" size={16} color={colores.tintaSecundaria} />
-          </Pressable>
+          estadisticas.total > 0 ? (
+            <Pressable
+              onPress={handleResetearDemo}
+              accessibilityRole="button"
+              accessibilityLabel="Vaciar las órdenes registradas"
+              style={({ pressed }) => [
+                styles.botonIcono,
+                {
+                  borderColor: colores.borde,
+                  backgroundColor: colores.superficie,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Icon name="rotate-ccw" size={16} color={colores.tintaSecundaria} />
+            </Pressable>
+          ) : undefined
         }
       />
     </View>

@@ -13,7 +13,14 @@ import {
 } from "../types/pedido";
 import { CONFIG } from "../constants/config";
 
-const STORAGE_KEY = "deliverytracker_pedidos_v1";
+const STORAGE_KEY = "deliverytracker_pedidos_v2";
+
+// Limpiar versiones anteriores con órdenes de ejemplo
+if (typeof window !== "undefined" && window.localStorage) {
+  try {
+    window.localStorage.removeItem("deliverytracker_pedidos_v1");
+  } catch {}
+}
 
 // ─── Suscriptores reactivos para actualizaciones en vivo ─────────
 type Listener = () => void;
@@ -79,52 +86,14 @@ function guardarEnStorage(nuevos: Record<string, Pedido>) {
   notificarCambio();
 }
 
-// ─── Semilla inicial para pruebas de e-commerce de ropa ───────────
-function inicializarSemilla() {
+// ─── Inicialización limpia del almacén ─────────────────────────
+function inicializarAlmacen() {
   const existentes = cargarDesdeStorage();
-  if (Object.keys(existentes).length === 0) {
-    const ahora = new Date().toISOString();
-    const semilla: Record<string, Pedido> = {
-      CLO1: {
-        codigo: "CLO1",
-        clienteNombre: "Valentina Morales",
-        clienteEmail: "valentina.m@email.cl",
-        direccionDespacho: "Av. Las Condes 9820, Depto 402",
-        comuna: "Las Condes, Santiago",
-        metodoEnvio: "Courier Express 24h",
-        totalEstimado: 65980,
-        estado: "recibido",
-        creadoEn: ahora,
-        actualizadoEn: ahora,
-        items: [
-          { nombre: "Chaqueta Denim Vintage", cantidad: 1, talla: "M", color: "Azul Petróleo", precioUnitario: 45990 },
-          { nombre: "Polera Básica Algodón Pima", cantidad: 1, talla: "S", color: "Blanco Hueso", precioUnitario: 19990 },
-        ],
-      },
-      MOD2: {
-        codigo: "MOD2",
-        clienteNombre: "Sebastián Reyes",
-        clienteEmail: "seba.reyes@email.cl",
-        direccionDespacho: "Santa Isabel 450, Torre B, Piso 12",
-        comuna: "Santiago Centro",
-        metodoEnvio: "Despacho Estándar",
-        totalEstimado: 42990,
-        estado: "preparando",
-        creadoEn: ahora,
-        actualizadoEn: ahora,
-        items: [
-          { nombre: "Hoodie Heavyweight Oversize", cantidad: 1, talla: "L", color: "Negro Carbón", precioUnitario: 42990 },
-        ],
-      },
-    };
-    guardarEnStorage(semilla);
-  } else {
-    pedidosCache = existentes;
-  }
+  pedidosCache = existentes;
 }
 
 // Inicializar de inmediato
-inicializarSemilla();
+inicializarAlmacen();
 
 // Escuchar cambios de otras pestañas en web
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -284,12 +253,12 @@ export async function avanzarEstado(
   return respuesta(200, actualizado);
 }
 
-/** Resetear datos a las semillas iniciales */
+/** Resetear datos y vaciar todas las órdenes */
 export async function resetearSemilla(): Promise<ApiResponse<Pedido[]>> {
   if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.removeItem(STORAGE_KEY);
   }
   pedidosCache = {};
-  inicializarSemilla();
-  return respuesta(200, Object.values(pedidosCache));
+  guardarEnStorage({});
+  return respuesta(200, []);
 }

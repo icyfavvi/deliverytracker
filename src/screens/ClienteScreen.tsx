@@ -51,8 +51,8 @@ export function ClienteScreen() {
   const { colores, tipografia, modo } = useTema();
 
   const [codigoInput, setCodigoInput] = useState("");
-  const [codigoBuscado, setCodigoBuscado] = useState<string | null>("CLO1");
-  const [estadoPedido, setEstadoPedido] = useState<EstadoUI<Pedido> | null>(null);
+  const [codigoBuscado, setCodigoBuscado] = useState<string | null>(null);
+  const [estadoPedido, setEstadoPedido] = useState<EstadoUI<Pedido> | null>({ tipo: "vacio" });
   const [errorCodigo, setErrorCodigo] = useState<string | null>(null);
   const [ultimaActualizacion, setUltimaActualizacion] = useState<string | null>(null);
   const [aviso, setAviso] = useState<AvisoEstado | null>(null);
@@ -243,7 +243,7 @@ export function ClienteScreen() {
               <TextInput
                 ref={inputRef}
                 style={[styles.inputCodigo, tipografia.boton, { color: colores.tinta }]}
-                placeholder="CLO1"
+                placeholder="ABCD"
                 placeholderTextColor={colores.tintaTerciaria}
                 value={codigoInput}
                 onChangeText={(texto) => {
@@ -302,11 +302,11 @@ export function ClienteScreen() {
           {/* ─── Resultado ────────────────────────────────────────── */}
           <View style={styles.resultado}>
             <EstadoUIRenderer
-              estado={estadoPedido ?? { tipo: "cargando" }}
+              estado={estadoPedido ?? { tipo: "vacio" }}
               mensajeVacio={
                 codigoBuscado
                   ? `No encontramos ninguna orden con el código "${codigoBuscado}". Revisa que los 4 caracteres coincidan con tu confirmación de compra.`
-                  : "Busca tu orden para ver su estado."
+                  : "Ingresa tu código de 4 caracteres arriba y presiona 'Rastrear' para consultar el estado de tu pedido."
               }
               accionVacia={
                 codigoBuscado

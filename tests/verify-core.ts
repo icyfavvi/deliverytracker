@@ -17,14 +17,14 @@ function assert(condition: boolean, message: string) {
 async function runTests() {
   console.log("=== PRUEBAS E-COMMERCE ROPA: ARQUITECTURA Y RÚBRICA UTEM ===\n");
 
-  // 1. Resetear semilla y verificar datos iniciales
-  console.log("1. Verificando semillas de e-commerce de moda:");
+  // 1. Resetear y verificar inicio limpio (0 órdenes precargadas)
+  console.log("1. Verificando inicio limpio (almacén sin órdenes precargadas):");
   await resetearSemilla();
   const resInicial = await obtenerPedidos();
   assert(resInicial.status === 200, "obtenerPedidos retorna status 200");
   assert(Array.isArray(resInicial.data), "data es un Array");
-  assert(resInicial.data.length >= 2, "Semilla contiene órdenes pre-cargadas (CLO1 y MOD2)");
-  console.log(`   Órdenes en catálogo: ${resInicial.data.map(p => p.codigo).join(", ")}`);
+  assert(resInicial.data.length === 0, "Almacén inicia vacío sin órdenes de ejemplo");
+  console.log("   Órdenes iniciales: 0 (inicio limpio verificado)");
 
   // 2. Consulta 404 discriminada
   console.log("\n2. Verificando estado discriminado vacío (404 Not Found):");
