@@ -26,6 +26,7 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 
 import { ProveedorPedidos } from "../context/PedidosContext";
+import { ProveedorSesionDemo } from "../context/SesionDemoContext";
 import { ProveedorTema, useTema } from "../theme/ThemeProvider";
 
 // La pantalla de inicio se oculta hasta que las tipografías estén listas,
@@ -59,10 +60,12 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ProveedorTema>
-        <ProveedorPedidos>
-          <BarraDeEstado />
-          <Stack screenOptions={{ headerShown: false }} />
-        </ProveedorPedidos>
+        <ProveedorSesionDemo>
+          <ProveedorPedidos>
+            <BarraDeEstado />
+            <Stack screenOptions={{ headerShown: false }} />
+          </ProveedorPedidos>
+        </ProveedorSesionDemo>
       </ProveedorTema>
     </SafeAreaProvider>
   );

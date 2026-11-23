@@ -31,6 +31,7 @@ import { InterruptorTema } from "../components/InterruptorTema";
 import { Masthead } from "../components/Masthead";
 import { PedidoCard } from "../components/PedidoCard";
 import { usePedidos } from "../context/PedidosContext";
+import { useSesionDemo } from "../context/SesionDemoContext";
 import { usePedidoPolling } from "../hooks/usePedidoPolling";
 import { vaciarPedidos } from "../services/pedidosApi";
 import { useTema } from "../theme/ThemeProvider";
@@ -60,6 +61,7 @@ export function LocalScreen() {
   const { width } = useWindowDimensions();
   const esAncho = width >= BREAKPOINTS.tablet;
   const { colores, tipografia, modo } = useTema();
+  const { salir } = useSesionDemo();
   const { estado, estadisticas, recargar, crearOrden, avanzar, refrescando } =
     usePedidos();
 
@@ -232,6 +234,46 @@ export function LocalScreen() {
     setItems((previos) => previos.filter((_, i) => i !== indice));
   };
 
+  // Completa el formulario con datos ficticios.
+  // La creación sigue utilizando el flujo original.
+  const cargarOrdenEjemplo = useCallback(() => {
+    setNombre("Camila Silva (demostración)");
+    setDireccion("Av. Providencia 1450, Dpto 802");
+    setComuna("Providencia, Santiago");
+
+    setItems([
+      {
+        nombre: "Chaqueta Denim Vintage",
+        cantidad: 1,
+        talla: "M",
+        color: "Azul Petróleo",
+        precioUnitario: 45990,
+      },
+      {
+        nombre: "Polera Básica Algodón Pima",
+        cantidad: 1,
+        talla: "L",
+        color: "Negro Lavado",
+        precioUnitario: 19990,
+      },
+    ]);
+
+    setErrorNombre(null);
+    setErrorItems(null);
+
+    setAviso({
+      titulo: "Orden de prueba preparada",
+      mensaje:
+        "Presiona Crear orden de despacho y sigue las etapas desde la tarjeta.",
+      tono: "info",
+    });
+
+    scrollFormRef.current?.scrollTo({
+      y: 0,
+      animated: true,
+    });
+  }, []);
+
   // ─── Crear Pedido (POST /v1/pedidos) ──────────────────────────
   const handleCrearPedido = useCallback(async () => {
     if (!nombre.trim()) {
@@ -348,6 +390,53 @@ export function LocalScreen() {
       <Text style={[tipografia.tituloDashboard, styles.tituloSeccion, { color: colores.tinta }]}>
         Crear orden de venta
       </Text>
+
+      <View
+        style={[
+          styles.panelDemo,
+          {
+            backgroundColor: colores.superficieHundida,
+            borderColor: colores.borde,
+          },
+        ]}
+      >
+        <View style={styles.tituloDemo}>
+          <Icon
+            name="sparkles"
+            size={17}
+            color={colores.acento}
+          />
+
+          <Text
+            style={[
+              tipografia.etiqueta,
+              { color: colores.tinta },
+            ]}
+          >
+            Recorrido de demostración
+          </Text>
+        </View>
+
+        <Text
+          style={[
+            tipografia.caption,
+            { color: colores.tintaSecundaria },
+          ]}
+        >
+          Prepara un paquete ficticio de $65.980.
+          Créalo y avanza las etapas; después busca
+          su código en Rastreo.
+        </Text>
+
+        <Boton
+          etiqueta="Cargar orden de ejemplo"
+          icono="package-plus"
+          variante="secundario"
+          onPress={cargarOrdenEjemplo}
+          anchoCompleto
+          compacto
+        />
+      </View>
 
       <CampoTexto
         etiqueta="Cliente / Comprador"
@@ -668,6 +757,43 @@ export function LocalScreen() {
     />
   );
 
+  const accionesCabecera = (
+    <View style={styles.accionesSesion}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Cerrar sesión"
+        onPress={() => {
+          void salir();
+        }}
+        style={({ pressed }) => [
+          styles.salirSesion,
+          {
+            borderColor: colores.borde,
+            backgroundColor: colores.superficie,
+            opacity: pressed ? 0.65 : 1,
+          },
+        ]}
+      >
+        <Icon
+          name="log-out"
+          size={16}
+          color={colores.tintaSecundaria}
+        />
+
+        <Text
+          style={[
+            tipografia.micro,
+            { color: colores.tintaSecundaria },
+          ]}
+        >
+          Salir
+        </Text>
+      </Pressable>
+
+      <InterruptorTema />
+    </View>
+  );
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colores.fondo }]} edges={["top"]}>
       <AvisoFlotante
@@ -693,7 +819,7 @@ export function LocalScreen() {
                 titulo="Bodega y despacho"
                 variante="tecnico"
                 descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
-                acciones={<InterruptorTema />}
+                acciones={accionesCabecera}
               />
             </View>
 
@@ -728,7 +854,7 @@ export function LocalScreen() {
               titulo="Bodega y despacho"
               variante="tecnico"
               descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
-              acciones={<InterruptorTema />}
+              acciones={accionesCabecera}
             />
             {formulario}
             {encabezadoLista}
@@ -790,6 +916,33 @@ const styles = StyleSheet.create({
   tarjetaFormulario: {
     padding: ESPACIOS.lg,
     borderWidth: 1,
+  },
+  panelDemo: {
+    borderRadius: RADIOS.md,
+    borderWidth: 1,
+    padding: ESPACIOS.md,
+    gap: ESPACIOS.sm,
+    marginBottom: ESPACIOS.lg,
+  },
+  tituloDemo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
+  },
+  accionesSesion: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
+  },
+  salirSesion: {
+    minHeight: 44,
+    borderRadius: RADIOS.pill,
+    borderWidth: 1,
+    paddingHorizontal: ESPACIOS.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: ESPACIOS.xs,
+    cursor: "pointer",
   },
   eyebrow: {
     letterSpacing: 1.6,
