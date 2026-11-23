@@ -1,13 +1,16 @@
 // ─── Ruta: Bodega / Despacho ─────────────────────────────────────
 //
-// La pantalla vive en src/screens para mantener los archivos manejables;
-// esta ruta solo la monta. Cada archivo dentro de src/app/ es una
-// pantalla navegable.
+// La bodega es solo para personal: sin sesión se muestra el login.
+// La pantalla vive en src/screens; esta ruta solo la monta.
 
 import React from "react";
 
+import { useAuth } from "../../context/AuthContext";
 import { LocalScreen } from "../../screens/LocalScreen";
+import { LoginScreen } from "../../screens/LoginScreen";
 
 export default function BodegaRoute() {
-  return <LocalScreen />;
+  const { sesion, cargando } = useAuth();
+  if (cargando) return null;
+  return sesion ? <LocalScreen /> : <LoginScreen />;
 }

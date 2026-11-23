@@ -25,6 +25,7 @@ import {
   JetBrainsMono_600SemiBold,
 } from "@expo-google-fonts/jetbrains-mono";
 
+import { ProveedorAuth } from "../context/AuthContext";
 import { ProveedorPedidos } from "../context/PedidosContext";
 import { ProveedorTema, useTema } from "../theme/ThemeProvider";
 
@@ -59,10 +60,12 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ProveedorTema>
-        <ProveedorPedidos>
-          <BarraDeEstado />
-          <Stack screenOptions={{ headerShown: false }} />
-        </ProveedorPedidos>
+        <ProveedorAuth>
+          <ProveedorPedidos>
+            <BarraDeEstado />
+            <Stack screenOptions={{ headerShown: false }} />
+          </ProveedorPedidos>
+        </ProveedorAuth>
       </ProveedorTema>
     </SafeAreaProvider>
   );

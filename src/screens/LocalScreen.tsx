@@ -27,6 +27,7 @@ import { Boton } from "../components/Boton";
 import { CampoTexto } from "../components/CampoTexto";
 import { EstadoUIRenderer } from "../components/EstadoUIRenderer";
 import { Icon } from "../components/Icon";
+import { BotonSalir } from "../components/BotonSalir";
 import { InterruptorTema } from "../components/InterruptorTema";
 import { Masthead } from "../components/Masthead";
 import { PedidoCard } from "../components/PedidoCard";
@@ -693,7 +694,12 @@ export function LocalScreen() {
                 titulo="Bodega y despacho"
                 variante="tecnico"
                 descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
-                acciones={<InterruptorTema />}
+                acciones={
+                <>
+                  <BotonSalir />
+                  <InterruptorTema />
+                </>
+              }
               />
             </View>
 
@@ -728,7 +734,12 @@ export function LocalScreen() {
               titulo="Bodega y despacho"
               variante="tecnico"
               descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
-              acciones={<InterruptorTema />}
+              acciones={
+                <>
+                  <BotonSalir />
+                  <InterruptorTema />
+                </>
+              }
             />
             {formulario}
             {encabezadoLista}
