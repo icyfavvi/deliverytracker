@@ -28,6 +28,7 @@ interface Props {
   icono?: LucideIconName;
   multilinea?: boolean;
   maxLength?: number;
+  secureTextEntry?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   autoCorrect?: boolean;
   keyboardType?: KeyboardTypeOptions;
@@ -47,6 +48,7 @@ export function CampoTexto({
   icono,
   multilinea = false,
   maxLength,
+  secureTextEntry = false,
   autoCapitalize = "sentences",
   autoCorrect = true,
   keyboardType = "default",
@@ -107,6 +109,7 @@ export function CampoTexto({
           placeholderTextColor={colores.tintaTerciaria}
           multiline={multilinea}
           maxLength={maxLength}
+          secureTextEntry={secureTextEntry}
           autoCapitalize={autoCapitalize}
           autoCorrect={autoCorrect}
           keyboardType={keyboardType}
