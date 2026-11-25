@@ -1,7 +1,8 @@
 // ─── Layout raíz (Expo Router) ───────────────────────────────────
 //
-// Aquí arranca la app: tipografías, tema, datos y navegación.
-// Las rutas cuelgan de <Stack>; las pestañas reales viven en (tabs).
+// Aquí arranca la app: tipografías (Space Grotesk, Manrope, DM Mono),
+// tema, datos y navegación. Las rutas cuelgan de <Stack>; las pestañas
+// reales viven en (tabs).
 
 import React, { useEffect } from "react";
 import { Stack } from "expo-router";
@@ -11,19 +12,19 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import {
-  PlayfairDisplay_600SemiBold,
-  PlayfairDisplay_700Bold,
-} from "@expo-google-fonts/playfair-display";
+  SpaceGrotesk_500Medium,
+  SpaceGrotesk_600SemiBold,
+  SpaceGrotesk_700Bold,
+} from "@expo-google-fonts/space-grotesk";
 import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-} from "@expo-google-fonts/inter";
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+} from "@expo-google-fonts/manrope";
 import {
-  JetBrainsMono_500Medium,
-  JetBrainsMono_600SemiBold,
-} from "@expo-google-fonts/jetbrains-mono";
+  DMMono_400Regular,
+  DMMono_500Medium,
+} from "@expo-google-fonts/dm-mono";
 
 import { ProveedorAuth } from "../context/AuthContext";
 import { ProveedorPedidos } from "../context/PedidosContext";
@@ -37,14 +38,14 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 
 export default function RootLayout() {
   const [fuentesListas, errorFuentes] = useFonts({
-    PlayfairDisplay_600SemiBold,
-    PlayfairDisplay_700Bold,
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    JetBrainsMono_500Medium,
-    JetBrainsMono_600SemiBold,
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_600SemiBold,
+    SpaceGrotesk_700Bold,
+    Manrope_400Regular,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    DMMono_400Regular,
+    DMMono_500Medium,
   });
 
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function RootLayout() {
   );
 }
 
-/** La barra del sistema acompaña al tema: clara sobre papel, oscura sobre tinta. */
+/** La barra del sistema acompaña al tema: oscura sobre claro, clara sobre ink. */
 function BarraDeEstado() {
   const { modo } = useTema();
   return <StatusBar style={modo === "oscuro" ? "light" : "dark"} />;

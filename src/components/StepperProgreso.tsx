@@ -1,16 +1,15 @@
-// ─── Stepper de despacho (4 pasos) ────────────────────────────────
+// ─── Timeline de despacho (4 pasos) ────────────────────────────────
 //
-// La línea de tiempo del pedido. Cada paso es un nodo con icono; los
-// pasos cumplidos van llenos con el color del estado actual y el paso
-// vigente se marca con un anillo. La etiqueta del paso se muestra
-// siempre: el color solo es un refuerzo, nunca el único indicador.
+// Referencia Atelier Noir: línea de tiempo de 4 etapas (Confirmada,
+// Preparando, En camino, Entregado). Los pasos cumplidos se pintan con
+// el color vivo del estado y el paso activo destaca con un halo suave.
 
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { Icon } from "./Icon";
 import { useTema } from "../theme/ThemeProvider";
-import { ESPACIOS, RADIOS } from "../theme/tokens";
+import { ESPACIOS, FUENTES, RADIOS } from "../theme/tokens";
 import {
   ETIQUETAS_ESTADO_CORTA,
   EstadoPedido,
@@ -25,19 +24,20 @@ interface Props {
 export function StepperProgreso({ estado }: Props) {
   const { colores, tipografia } = useTema();
   const indiceActual = FLUJO_ESTADOS.indexOf(estado);
-  const colorActual = colores.estado[estado];
+  const colorActivo = colores.puntoEstado[estado];
+  const colorTextoActivo = colores.estado[estado];
+  const haloActivo = colores.estadoSuave[estado];
   const ultimo = FLUJO_ESTADOS.length - 1;
 
   return (
     <View
       style={styles.contenedor}
       accessibilityRole="progressbar"
-      accessibilityLabel={`Progreso del despacho: paso ${indiceActual + 1} de ${FLUJO_ESTADOS.length}`}
+      accessibilityLabel={`Progreso del despacho: paso ${indiceActual + 1} de ${FLUJO_ESTADOS.length}, ${ETIQUETAS_ESTADO_CORTA[estado]}`}
     >
       {FLUJO_ESTADOS.map((paso, indice) => {
         const completado = indice <= indiceActual;
         const esActual = indice === indiceActual;
-        const colorNodo = completado ? colorActual : colores.borde;
 
         return (
           <View key={paso} style={styles.paso}>
@@ -47,7 +47,8 @@ export function StepperProgreso({ estado }: Props) {
                   style={[
                     styles.linea,
                     {
-                      backgroundColor: indice <= indiceActual ? colorActual : colores.borde,
+                      backgroundColor:
+                        indice <= indiceActual ? colorActivo : colores.borde,
                     },
                   ]}
                 />
@@ -55,19 +56,25 @@ export function StepperProgreso({ estado }: Props) {
 
               <View
                 style={[
-                  styles.nodo,
-                  {
-                    borderColor: colorNodo,
-                    backgroundColor: completado ? colorNodo : colores.superficie,
-                  },
-                  esActual && styles.nodoActual,
+                  styles.halo,
+                  esActual && { backgroundColor: haloActivo },
                 ]}
               >
-                <Icon
-                  name={ICONOS_ESTADO[paso]}
-                  size={15}
-                  color={completado ? colores.superficie : colores.tintaTerciaria}
-                />
+                <View
+                  style={[
+                    styles.nodo,
+                    {
+                      borderColor: completado ? colorActivo : colores.bordeFuerte,
+                      backgroundColor: completado ? colorActivo : colores.superficie,
+                    },
+                  ]}
+                >
+                  <Icon
+                    name={ICONOS_ESTADO[paso]}
+                    size={15}
+                    color={completado ? "#ffffff" : colores.tintaTerciaria}
+                  />
+                </View>
               </View>
 
               {indice < ultimo ? (
@@ -75,7 +82,8 @@ export function StepperProgreso({ estado }: Props) {
                   style={[
                     styles.linea,
                     {
-                      backgroundColor: indice < indiceActual ? colorActual : colores.borde,
+                      backgroundColor:
+                        indice < indiceActual ? colorActivo : colores.borde,
                     },
                   ]}
                 />
@@ -84,16 +92,16 @@ export function StepperProgreso({ estado }: Props) {
 
             <Text
               style={[
-                tipografia.micro,
+                tipografia.caption,
                 styles.etiqueta,
                 {
                   color: esActual
-                    ? colores.tinta
+                    ? colorTextoActivo
                     : completado
-                      ? colores.tintaSecundaria
+                      ? colores.tinta
                       : colores.tintaTerciaria,
+                  fontFamily: esActual ? FUENTES.semi : FUENTES.medio,
                 },
-                esActual && styles.etiquetaActual,
               ]}
               numberOfLines={2}
             >
@@ -124,23 +132,21 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 2,
   },
+  halo: {
+    padding: 4,
+    borderRadius: RADIOS.pill,
+  },
   nodo: {
-    width: 32,
-    height: 32,
+    width: 34,
+    height: 34,
     borderRadius: RADIOS.pill,
     borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
   },
-  nodoActual: {
-    borderWidth: 3,
-  },
   etiqueta: {
     textAlign: "center",
-    marginTop: ESPACIOS.sm,
+    marginTop: ESPACIOS.xs + 2,
     paddingHorizontal: ESPACIOS.xs,
-  },
-  etiquetaActual: {
-    fontWeight: "700",
   },
 });

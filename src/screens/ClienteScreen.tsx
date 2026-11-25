@@ -1,11 +1,9 @@
-// ─── Pantalla CLIENTE: E-commerce de Moda & Vestuario ──────────────
+// ─── Pantalla CLIENTE: Seguimiento de Despacho ─────────────────────
 //
-// Requisitos de Rúbrica UTEM:
-// 1. Consulta por código de pedido.
-// 2. Polling con intervalo creciente (5s primeros 30s, luego 30s) + cleanup.
-// 3. Manejo explícito de 4 estados con tipo discriminado (cargando/error/vacio/datos).
-// 4. "El cliente recibe aviso cuando el estado cambia" -> Notificación visual en vivo.
-// 5. Totalmente responsive en ~5", ~6.7" y tablet.
+// Rediseño visual Atelier Noir (ink #0a0d10 + azul cobalto #3e6ff6),
+// conservando intactos el polling adaptativo, los 4 estados de UI
+// discriminados, las notificaciones de cambio de estado y la
+// accesibilidad WCAG AA (>= 44pt, >= 12px, contraste >= 4.5:1).
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
@@ -29,7 +27,13 @@ import { StepperProgreso } from "../components/StepperProgreso";
 import { usePedidoPolling } from "../hooks/usePedidoPolling";
 import { obtenerPedidoPorCodigo } from "../services/pedidosApi";
 import { useTema } from "../theme/ThemeProvider";
-import { BREAKPOINTS, ESPACIOS, RADIOS, sombraTarjeta } from "../theme/tokens";
+import {
+  BREAKPOINTS,
+  ESPACIOS,
+  FUENTES,
+  RADIOS,
+  sombraTarjeta,
+} from "../theme/tokens";
 import {
   DESCRIPCIONES_ESTADO,
   EstadoPedido,
@@ -48,14 +52,19 @@ interface AvisoEstado {
 export function ClienteScreen() {
   const { width } = useWindowDimensions();
   const esAncho = width >= BREAKPOINTS.tablet;
-  const { colores, tipografia, modo } = useTema();
+  const { colores, tipografia, modo, puntoMinimo } = useTema();
 
   const [codigoInput, setCodigoInput] = useState("");
   const [codigoBuscado, setCodigoBuscado] = useState<string | null>(null);
-  const [estadoPedido, setEstadoPedido] = useState<EstadoUI<Pedido> | null>({ tipo: "vacio" });
+  const [estadoPedido, setEstadoPedido] = useState<EstadoUI<Pedido> | null>({
+    tipo: "vacio",
+  });
   const [errorCodigo, setErrorCodigo] = useState<string | null>(null);
-  const [ultimaActualizacion, setUltimaActualizacion] = useState<string | null>(null);
+  const [ultimaActualizacion, setUltimaActualizacion] = useState<string | null>(
+    null
+  );
   const [aviso, setAviso] = useState<AvisoEstado | null>(null);
+  const [campoEnfocado, setCampoEnfocado] = useState(false);
 
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
 
@@ -70,14 +79,12 @@ export function ClienteScreen() {
       const res = await obtenerPedidoPorCodigo(codigoBuscado);
 
       if (res.status === 404) {
-        // Estado discriminado: VACÍO (404 Not Found ≠ Error 500)
         setEstadoPedido({ tipo: "vacio" });
         estadoAnteriorRef.current = null;
         return;
       }
 
       if (!res.ok || !res.data) {
-        // Estado discriminado: ERROR de servidor
         setEstadoPedido({
           tipo: "error",
           mensaje: `El servidor respondió con un error (${res.status}).`,
@@ -87,7 +94,6 @@ export function ClienteScreen() {
 
       const pedidoActualizado = res.data;
 
-      // Detectar cambio de estado para emitir el AVISO AL CLIENTE
       if (
         estadoAnteriorRef.current !== null &&
         estadoAnteriorRef.current !== pedidoActualizado.estado
@@ -106,7 +112,6 @@ export function ClienteScreen() {
         })
       );
 
-      // Estado discriminado: DATOS
       setEstadoPedido({ tipo: "datos", datos: pedidoActualizado });
     } catch {
       setEstadoPedido({
@@ -116,7 +121,7 @@ export function ClienteScreen() {
     }
   }, [codigoBuscado]);
 
-  // ─── Polling con intervalo creciente + cleanup (Rúbrica) ─────
+  // ─── Polling con intervalo creciente + cleanup ───────────────
   const pollingStatus = usePedidoPolling({
     fetchFn: consultarPedido,
     enabled: codigoBuscado !== null,
@@ -125,7 +130,6 @@ export function ClienteScreen() {
     umbralCambio: 30_000,
   });
 
-  // Al cambiar el código buscado, consultar asíncronamente con protección de cancelación
   useEffect(() => {
     if (!codigoBuscado) return;
     let cancelado = false;
@@ -168,7 +172,6 @@ export function ClienteScreen() {
     };
   }, [codigoBuscado]);
 
-  // El aviso se cierra solo a los 7 segundos.
   useEffect(() => {
     if (!aviso) return;
     const temporizador = setTimeout(() => setAviso(null), DURACION_AVISO_MS);
@@ -178,11 +181,15 @@ export function ClienteScreen() {
   const handleBuscar = useCallback(() => {
     const limpio = codigoInput.trim().toUpperCase();
     if (limpio.length === 0) {
-      setErrorCodigo("Ingresa el código que aparece en tu confirmación de compra.");
+      setErrorCodigo(
+        "Ingresa el código que aparece en tu confirmación de compra."
+      );
       return;
     }
     if (limpio.length < 4) {
-      setErrorCodigo("El código tiene 4 caracteres. Revisa los que te enviamos.");
+      setErrorCodigo(
+        "El código tiene 4 caracteres. Revisa los que te enviamos."
+      );
       return;
     }
     setErrorCodigo(null);
@@ -194,7 +201,10 @@ export function ClienteScreen() {
   const formatearPrecio = (valor: number) => "$" + valor.toLocaleString("es-CL");
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colores.fondo }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: colores.fondo }]}
+      edges={["top"]}
+    >
       <AvisoFlotante
         visible={aviso !== null}
         tono={aviso?.tono ?? "acento"}
@@ -211,96 +221,173 @@ export function ClienteScreen() {
       >
         <View style={styles.contenedor}>
           <Masthead
-            eyebrow="Atelier Noir · Seguimiento de compra"
+            eyebrow="Atelier Noir · Seguimiento"
             titulo="Rastrea tu despacho"
             variante="tecnico"
-            descripcion="Ingresa tu código de 4 caracteres para ver el estado de preparación y despacho de tus prendas en tiempo real."
+            descripcion="Consulta en vivo el estado de preparación y entrega de tus prendas."
             acciones={<InterruptorTema />}
           />
 
-          {/* ─── Buscador ─────────────────────────────────────────── */}
+          {/* ─── Hero + Buscador (referencia .client-hero) ──────── */}
           <View
             style={[
-              styles.buscador,
+              styles.heroCard,
               {
-                backgroundColor: colores.superficie,
-                borderColor: colores.borde,
+                backgroundColor: colores.panelOscuro,
+                borderColor: colores.panelOscuroBorde,
                 borderRadius: RADIOS.lg,
               },
               sombraTarjeta(modo),
             ]}
           >
-            <View
-              style={[
-                styles.campoCodigo,
-                {
-                  backgroundColor: colores.superficieHundida,
-                  borderRadius: RADIOS.md,
-                  borderColor: errorCodigo ? colores.error : "transparent",
-                },
-              ]}
-            >
-              <Icon name="hash" size={16} color={colores.tintaTerciaria} />
-              <TextInput
-                ref={inputRef}
-                style={[styles.inputCodigo, tipografia.boton, { color: colores.tinta }]}
-                placeholder="ABCD"
-                placeholderTextColor={colores.tintaTerciaria}
-                value={codigoInput}
-                onChangeText={(texto) => {
-                  setCodigoInput(texto.toUpperCase());
-                  if (errorCodigo) setErrorCodigo(null);
-                }}
-                maxLength={4}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                returnKeyType="search"
-                onSubmitEditing={handleBuscar}
-                accessibilityLabel="Código de seguimiento de tu orden"
-              />
-              {codigoInput.length > 0 ? (
-                <Pressable
-                  onPress={() => setCodigoInput("")}
-                  hitSlop={10}
-                  accessibilityRole="button"
-                  accessibilityLabel="Limpiar código"
-                  style={styles.limpiar}
-                >
-                  <Icon name="x" size={14} color={colores.tintaTerciaria} />
-                </Pressable>
-              ) : null}
-            </View>
+            {/* Acentos geométricos concéntricos */}
+            <View pointerEvents="none" style={styles.aroExterno} />
+            <View pointerEvents="none" style={styles.aroInterno} />
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.botonRastrear,
-                {
-                  backgroundColor: colores.primario,
-                  borderRadius: RADIOS.md,
-                  opacity: pressed ? 0.8 : 1,
-                },
-              ]}
-              onPress={handleBuscar}
-              accessibilityRole="button"
-              accessibilityLabel="Rastrear pedido"
-            >
-              <Icon name="search" size={17} color={colores.sobrePrimario} />
-              <Text style={[tipografia.boton, { color: colores.sobrePrimario }]}>
-                Rastrear
-              </Text>
-            </Pressable>
-
-            {errorCodigo ? (
-              <View style={styles.errorFila}>
-                <Icon name="circle-alert" size={13} color={colores.error} />
-                <Text style={[tipografia.caption, { color: colores.error }]}>
-                  {errorCodigo}
+            <View style={styles.heroEncabezado}>
+              <View style={styles.heroPill}>
+                <Icon name="package-search" size={14} color="#86a6ff" />
+                <Text style={[tipografia.micro, styles.heroPillTexto]}>
+                  CÓDIGO DE ORDEN
                 </Text>
               </View>
-            ) : null}
+              <Text style={[tipografia.subtitulo, styles.heroTitulo]}>
+                Ingresa tu código de 4 caracteres
+              </Text>
+              <Text style={[tipografia.caption, styles.heroBajada]}>
+                Actualización automática sin recargar la pantalla.
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.buscadorCaja,
+                {
+                  backgroundColor: colores.superficie,
+                  borderColor: colores.borde,
+                  borderRadius: RADIOS.md,
+                },
+              ]}
+            >
+              <View style={esAncho ? styles.buscadorFilaAncha : styles.buscadorColumna}>
+                <View
+                  style={[
+                    styles.campoCodigo,
+                    {
+                      backgroundColor: campoEnfocado
+                        ? colores.superficie
+                        : colores.superficieHundida,
+                      borderRadius: RADIOS.sm,
+                      borderColor: errorCodigo
+                        ? colores.error
+                        : campoEnfocado
+                          ? colores.acento
+                          : colores.borde,
+                      minHeight: Math.max(puntoMinimo, 50),
+                    },
+                  ]}
+                >
+                  <Icon
+                    name="hash"
+                    size={17}
+                    color={
+                      campoEnfocado
+                        ? colores.acentoIntenso
+                        : colores.tintaTerciaria
+                    }
+                  />
+                  <TextInput
+                    ref={inputRef}
+                    style={[
+                      styles.inputCodigo,
+                      tipografia.codigo,
+                      { color: colores.tinta, fontSize: 18 },
+                    ]}
+                    placeholder="ABCD"
+                    placeholderTextColor={colores.tintaTerciaria}
+                    value={codigoInput}
+                    onChangeText={(texto) => {
+                      setCodigoInput(texto.toUpperCase());
+                      if (errorCodigo) setErrorCodigo(null);
+                    }}
+                    onFocus={() => setCampoEnfocado(true)}
+                    onBlur={() => setCampoEnfocado(false)}
+                    maxLength={4}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    returnKeyType="search"
+                    onSubmitEditing={handleBuscar}
+                    accessibilityLabel="Código de seguimiento de tu orden"
+                  />
+                  {codigoInput.length > 0 ? (
+                    <Pressable
+                      onPress={() => setCodigoInput("")}
+                      accessibilityRole="button"
+                      accessibilityLabel="Limpiar código"
+                      style={({ pressed }) => [
+                        styles.limpiar,
+                        {
+                          minWidth: puntoMinimo,
+                          minHeight: puntoMinimo,
+                          opacity: pressed ? 0.6 : 1,
+                        },
+                      ]}
+                    >
+                      <Icon
+                        name="x"
+                        size={16}
+                        color={colores.tintaSecundaria}
+                      />
+                    </Pressable>
+                  ) : null}
+                </View>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.botonRastrear,
+                    esAncho && styles.botonRastrearAncho,
+                    {
+                      backgroundColor: colores.primario,
+                      borderRadius: RADIOS.sm,
+                      minHeight: Math.max(puntoMinimo, 50),
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                  onPress={handleBuscar}
+                  accessibilityRole="button"
+                  accessibilityLabel="Rastrear pedido"
+                >
+                  <Icon
+                    name="search"
+                    size={17}
+                    color={colores.sobrePrimario}
+                  />
+                  <Text
+                    style={[tipografia.boton, { color: colores.sobrePrimario }]}
+                  >
+                    Rastrear
+                  </Text>
+                </Pressable>
+              </View>
+
+              {errorCodigo ? (
+                <View style={styles.errorFila}>
+                  <Icon name="circle-alert" size={14} color={colores.error} />
+                  <Text
+                    accessibilityRole="alert"
+                    style={[
+                      tipografia.caption,
+                      { color: colores.error, flex: 1 },
+                    ]}
+                  >
+                    {errorCodigo}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </View>
 
-          {/* ─── Resultado ────────────────────────────────────────── */}
+          {/* ─── Resultado ──────────────────────────────────────── */}
           <View style={styles.resultado}>
             <EstadoUIRenderer
               estado={estadoPedido ?? { tipo: "vacio" }}
@@ -329,7 +416,7 @@ export function ClienteScreen() {
                     {
                       backgroundColor: colores.superficie,
                       borderColor: colores.borde,
-                      borderRadius: RADIOS.xl,
+                      borderRadius: RADIOS.lg,
                     },
                     sombraTarjeta(modo),
                   ]}
@@ -346,7 +433,9 @@ export function ClienteScreen() {
                       >
                         ORDEN REGISTRADA
                       </Text>
-                      <Text style={[tipografia.codigo, { color: colores.tinta }]}>
+                      <Text
+                        style={[tipografia.codigo, { color: colores.tinta }]}
+                      >
                         #{pedido.codigo}
                       </Text>
                     </View>
@@ -358,7 +447,8 @@ export function ClienteScreen() {
                     style={[
                       styles.cajaEstado,
                       {
-                        backgroundColor: colores.superficieHundida,
+                        backgroundColor: colores.estadoSuave[pedido.estado],
+                        borderColor: colores.borde,
                         borderRadius: RADIOS.md,
                       },
                     ]}
@@ -368,7 +458,7 @@ export function ClienteScreen() {
                     </Text>
                   </View>
 
-                  {/* Stepper de 4 pasos */}
+                  {/* Timeline de 4 pasos */}
                   <View style={styles.seccion}>
                     <StepperProgreso estado={pedido.estado} />
                   </View>
@@ -391,13 +481,26 @@ export function ClienteScreen() {
                       DATOS DE ENTREGA
                     </Text>
                     <View style={styles.filaDato}>
-                      <Icon name="user" size={15} color={colores.tintaTerciaria} />
-                      <Text style={[tipografia.cuerpoFuerte, { color: colores.tinta }]}>
+                      <Icon
+                        name="user"
+                        size={15}
+                        color={colores.tintaTerciaria}
+                      />
+                      <Text
+                        style={[
+                          tipografia.cuerpoFuerte,
+                          { color: colores.tinta, flex: 1 },
+                        ]}
+                      >
                         {pedido.clienteNombre}
                       </Text>
                     </View>
                     <View style={styles.filaDato}>
-                      <Icon name="map-pin" size={15} color={colores.tintaTerciaria} />
+                      <Icon
+                        name="map-pin"
+                        size={15}
+                        color={colores.tintaTerciaria}
+                      />
                       <Text
                         style={[
                           tipografia.caption,
@@ -409,8 +512,20 @@ export function ClienteScreen() {
                       </Text>
                     </View>
                     <View style={styles.filaDato}>
-                      <Icon name="truck" size={15} color={colores.acento} />
-                      <Text style={[tipografia.caption, { color: colores.acento }]}>
+                      <Icon
+                        name="truck"
+                        size={15}
+                        color={colores.acentoIntenso}
+                      />
+                      <Text
+                        style={[
+                          tipografia.caption,
+                          {
+                            color: colores.acentoIntenso,
+                            fontFamily: FUENTES.semi,
+                          },
+                        ]}
+                      >
                         {pedido.metodoEnvio}
                       </Text>
                     </View>
@@ -433,44 +548,84 @@ export function ClienteScreen() {
                     >
                       PRENDAS EN ESTA ORDEN ({pedido.items.length})
                     </Text>
-                    {pedido.items.map((item, idx) => (
-                      <View key={`${item.nombre}-${idx}`} style={styles.prendaFila}>
-                        <View style={styles.prendaTexto}>
-                          <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
-                            {item.cantidad}× {item.nombre}
-                          </Text>
-                          {(item.talla || item.color) && (
-                            <Text
-                              style={[tipografia.caption, { color: colores.tintaSecundaria }]}
-                            >
-                              {[item.talla ? `Talla ${item.talla}` : null, item.color]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </Text>
-                          )}
-                        </View>
-                        {item.precioUnitario ? (
-                          <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
-                            {formatearPrecio(item.precioUnitario * item.cantidad)}
-                          </Text>
-                        ) : null}
-                      </View>
-                    ))}
-
                     <View
                       style={[
-                        styles.subtotalFila,
-                        { borderTopColor: colores.borde },
+                        styles.panelPrendas,
+                        {
+                          backgroundColor: colores.superficieHundida,
+                          borderColor: colores.borde,
+                          borderRadius: RADIOS.md,
+                        },
                       ]}
                     >
-                      <Text
-                        style={[tipografia.etiqueta, { color: colores.tintaSecundaria }]}
+                      {pedido.items.map((item, idx) => (
+                        <View
+                          key={`${item.nombre}-${idx}`}
+                          style={styles.prendaFila}
+                        >
+                          <View style={styles.prendaTexto}>
+                            <Text
+                              style={[
+                                tipografia.etiqueta,
+                                { color: colores.tinta },
+                              ]}
+                            >
+                              {item.cantidad}× {item.nombre}
+                            </Text>
+                            {(item.talla || item.color) && (
+                              <Text
+                                style={[
+                                  tipografia.caption,
+                                  { color: colores.tintaSecundaria },
+                                ]}
+                              >
+                                {[
+                                  item.talla ? `Talla ${item.talla}` : null,
+                                  item.color,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </Text>
+                            )}
+                          </View>
+                          {item.precioUnitario ? (
+                            <Text
+                              style={[
+                                tipografia.micro,
+                                { color: colores.tinta },
+                              ]}
+                            >
+                              {formatearPrecio(
+                                item.precioUnitario * item.cantidad
+                              )}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+
+                      <View
+                        style={[
+                          styles.subtotalFila,
+                          { borderTopColor: colores.borde },
+                        ]}
                       >
-                        Total pagado
-                      </Text>
-                      <Text style={[tipografia.subtitulo, { color: colores.tinta }]}>
-                        {formatearPrecio(pedido.totalEstimado ?? 0)}
-                      </Text>
+                        <Text
+                          style={[
+                            tipografia.etiqueta,
+                            { color: colores.tintaSecundaria },
+                          ]}
+                        >
+                          Total pagado
+                        </Text>
+                        <Text
+                          style={[
+                            tipografia.subtitulo,
+                            { color: colores.tinta },
+                          ]}
+                        >
+                          {formatearPrecio(pedido.totalEstimado ?? 0)}
+                        </Text>
+                      </View>
                     </View>
                   </View>
 
@@ -484,21 +639,32 @@ export function ClienteScreen() {
                   >
                     <View style={styles.monitoreoFila}>
                       <View
-                        style={[styles.pulso, { backgroundColor: colores.exito }]}
+                        style={[
+                          styles.pulso,
+                          { backgroundColor: colores.puntoEstado.entregado },
+                        ]}
                       />
                       <View style={styles.monitoreoTextos}>
-                        <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
+                        <Text
+                          style={[
+                            tipografia.etiqueta,
+                            { color: colores.tinta },
+                          ]}
+                        >
                           Monitoreo activo
                         </Text>
                         <Text
-                          style={[tipografia.caption, { color: colores.tintaSecundaria }]}
+                          style={[
+                            tipografia.caption,
+                            { color: colores.tintaSecundaria },
+                          ]}
                         >
-                          Consultando cada {pollingStatus.frecuenciaSegundos}s
+                          Cada {pollingStatus.frecuenciaSegundos}s
                           {pollingStatus.esFrecuenciaLenta
-                            ? " · modo ahorro"
+                            ? " · ahorro"
                             : " · en vivo"}
                           {ultimaActualizacion
-                            ? ` · actualizado ${ultimaActualizacion}`
+                            ? ` · ${ultimaActualizacion}`
                             : ""}
                         </Text>
                       </View>
@@ -509,6 +675,8 @@ export function ClienteScreen() {
                         style={({ pressed }) => [
                           styles.botonRefrescar,
                           {
+                            minWidth: puntoMinimo,
+                            minHeight: puntoMinimo,
                             borderColor: colores.borde,
                             backgroundColor: colores.superficieHundida,
                             borderRadius: RADIOS.sm,
@@ -516,7 +684,11 @@ export function ClienteScreen() {
                           },
                         ]}
                       >
-                        <Icon name="refresh-cw" size={14} color={colores.tinta} />
+                        <Icon
+                          name="refresh-cw"
+                          size={16}
+                          color={colores.tinta}
+                        />
                       </Pressable>
                     </View>
                   </View>
@@ -545,28 +717,89 @@ const styles = StyleSheet.create({
   },
   contenedor: {
     width: "100%",
-    maxWidth: 620,
+    maxWidth: 660,
   },
-  buscador: {
-    padding: ESPACIOS.md,
+  heroCard: {
+    padding: ESPACIOS.lg,
     marginBottom: ESPACIOS.lg,
     borderWidth: 1,
+    overflow: "hidden",
+    position: "relative",
+  },
+  aroExterno: {
+    position: "absolute",
+    top: -48,
+    right: -48,
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    borderWidth: 1,
+    borderColor: "rgba(111, 149, 255, 0.22)",
+  },
+  aroInterno: {
+    position: "absolute",
+    top: -20,
+    right: -20,
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    borderWidth: 1,
+    borderColor: "rgba(80, 200, 232, 0.18)",
+  },
+  heroEncabezado: {
+    marginBottom: ESPACIOS.md,
+    gap: ESPACIOS.xs,
+  },
+  heroPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: ESPACIOS.xs + 2,
+    backgroundColor: "rgba(62, 111, 246, 0.16)",
+    borderRadius: RADIOS.pill,
+    paddingHorizontal: ESPACIOS.sm + 2,
+    paddingVertical: ESPACIOS.xs,
+    marginBottom: ESPACIOS.xs,
+  },
+  heroPillTexto: {
+    color: "#9ab5ff",
+  },
+  heroTitulo: {
+    color: "#ffffff",
+  },
+  heroBajada: {
+    color: "#b8c2ce",
+  },
+  buscadorCaja: {
+    padding: ESPACIOS.sm + 2,
+    borderWidth: 1,
+  },
+  buscadorColumna: {
+    gap: ESPACIOS.sm,
+  },
+  buscadorFilaAncha: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: ESPACIOS.sm,
   },
   campoCodigo: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: ESPACIOS.sm,
-    paddingHorizontal: ESPACIOS.md,
-    minHeight: 52,
+    paddingLeft: ESPACIOS.md,
+    paddingRight: ESPACIOS.xs,
     borderWidth: 1.5,
   },
   inputCodigo: {
     flex: 1,
-    letterSpacing: 4,
+    minWidth: 0,
+    letterSpacing: 3,
     paddingVertical: ESPACIOS.sm,
   },
   limpiar: {
-    padding: ESPACIOS.xs,
+    alignItems: "center",
+    justifyContent: "center",
     cursor: "pointer",
   },
   botonRastrear: {
@@ -574,15 +807,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: ESPACIOS.sm,
-    minHeight: 48,
-    marginTop: ESPACIOS.md,
+    paddingHorizontal: ESPACIOS.xl,
     cursor: "pointer",
+  },
+  botonRastrearAncho: {
+    minWidth: 148,
   },
   errorFila: {
     flexDirection: "row",
     alignItems: "center",
     gap: ESPACIOS.sm,
     marginTop: ESPACIOS.sm,
+    paddingHorizontal: ESPACIOS.xs,
   },
   resultado: {
     width: "100%",
@@ -596,17 +832,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
     gap: ESPACIOS.sm,
+    flexWrap: "wrap",
   },
   tarjetaHeaderTexto: {
     flex: 1,
+    minWidth: 140,
   },
   eyebrow: {
-    letterSpacing: 1.6,
     marginBottom: ESPACIOS.xs,
   },
   cajaEstado: {
     padding: ESPACIOS.md,
-    marginTop: ESPACIOS.lg,
+    borderWidth: 1,
+    marginTop: ESPACIOS.md,
   },
   seccion: {
     marginTop: ESPACIOS.xl,
@@ -628,12 +866,16 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  panelPrendas: {
+    padding: ESPACIOS.md,
+    borderWidth: 1,
+    gap: ESPACIOS.sm,
+  },
   prendaFila: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     gap: ESPACIOS.sm,
-    paddingVertical: ESPACIOS.xs + 1,
   },
   prendaTexto: {
     flex: 1,
@@ -644,8 +886,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     borderTopWidth: 1,
-    marginTop: ESPACIOS.sm,
-    paddingTop: ESPACIOS.md,
+    marginTop: ESPACIOS.xs,
+    paddingTop: ESPACIOS.sm,
   },
   monitoreoFila: {
     flexDirection: "row",
@@ -656,13 +898,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   pulso: {
-    width: 9,
-    height: 9,
+    width: 10,
+    height: 10,
     borderRadius: 5,
   },
   botonRefrescar: {
-    width: 40,
-    height: 40,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,

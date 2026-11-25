@@ -1,8 +1,7 @@
 // ─── Botón ───────────────────────────────────────────────────────
 //
-// Un solo botón para toda la app. Reúne lo que siempre se olvida:
-// área táctil mínima, cursor de puntero en web, estado de pulsación que
-// no mueve el layout, estado deshabilitado y estado de carga.
+// Único botón reutilizable de la app. Garantiza área táctil mínima
+// >= 44x44pt, estados de carga y deshabilitado, y contraste WCAG AA.
 
 import React from "react";
 import {
@@ -56,17 +55,19 @@ export function Boton({
   const fondo =
     variante === "primario"
       ? colores.primario
-      : variante === "peligro"
-        ? colores.error
-        : "transparent";
+      : variante === "secundario"
+        ? colores.superficie
+        : variante === "peligro"
+          ? colores.error
+          : "transparent";
 
   const colorTexto =
     variante === "primario"
       ? colores.sobrePrimario
       : variante === "peligro"
-        ? "#FFFFFF"
+        ? "#ffffff"
         : variante === "fantasma"
-          ? colores.acento
+          ? colores.acentoIntenso
           : colores.tinta;
 
   return (
@@ -84,9 +85,10 @@ export function Boton({
           borderColor:
             variante === "secundario" ? colores.bordeFuerte : "transparent",
           borderWidth: variante === "secundario" ? 1 : 0,
-          minHeight: compacto ? Math.max(puntoMinimo - 10, 36) : puntoMinimo,
-          borderRadius: RADIOS.md,
-          opacity: inactivo ? 0.45 : pressed ? 0.78 : 1,
+          minHeight: puntoMinimo,
+          minWidth: puntoMinimo,
+          borderRadius: RADIOS.sm,
+          opacity: inactivo ? 0.45 : pressed ? 0.82 : 1,
         },
         anchoCompleto && styles.anchoCompleto,
         style,
@@ -96,7 +98,9 @@ export function Boton({
         <ActivityIndicator size="small" color={colorTexto} />
       ) : (
         <View style={styles.contenido}>
-          {icono ? <Icon name={icono} size={compacto ? 15 : 17} color={colorTexto} /> : null}
+          {icono ? (
+            <Icon name={icono} size={compacto ? 15 : 17} color={colorTexto} />
+          ) : null}
           <Text
             style={[
               tipografia.boton,
@@ -108,7 +112,11 @@ export function Boton({
             {etiqueta}
           </Text>
           {iconoDerecha ? (
-            <Icon name={iconoDerecha} size={compacto ? 15 : 17} color={colorTexto} />
+            <Icon
+              name={iconoDerecha}
+              size={compacto ? 15 : 17}
+              color={colorTexto}
+            />
           ) : null}
         </View>
       )}

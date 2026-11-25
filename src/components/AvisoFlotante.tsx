@@ -189,7 +189,10 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   cerrar: {
-    padding: ESPACIOS.xs,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
     cursor: "pointer",
   },
   accion: {
@@ -197,7 +200,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: ESPACIOS.xs + 2,
     paddingHorizontal: ESPACIOS.sm + 2,
-    paddingVertical: ESPACIOS.sm,
+    minHeight: 44,
     borderWidth: 1,
     cursor: "pointer",
   },

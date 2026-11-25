@@ -1,11 +1,8 @@
 // ─── Pantalla LOCAL / BODEGA: Despacho de E-commerce de Moda ─────────
 //
-// Requisitos de Rúbrica UTEM:
-// 1. Crear pedido (con cliente, prendas, tallas, dirección).
-// 2. Avanzar estado (recibido → preparando → listo → entregado).
-// 3. Manejo de los 4 estados de UI (cargando, error, vacío, datos).
-// 4. Inmutabilidad y estado derivado (conteos, totales, filtros).
-// 5. Totalmente responsive en ~5", ~6.7" y tablet (>600px dos columnas).
+// Rediseño visual Atelier Noir (ink + azul cobalto + tarjetas de métrica),
+// preservando toda la lógica de negocio, creación de órdenes, polling,
+// catálogo rápido, diseño responsivo y accesibilidad >= 44pt / WCAG AA.
 
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import {
@@ -24,13 +21,14 @@ import * as Clipboard from "expo-clipboard";
 
 import { AvisoFlotante, TonoAviso } from "../components/AvisoFlotante";
 import { Boton } from "../components/Boton";
+import { BotonSalir } from "../components/BotonSalir";
 import { CampoTexto } from "../components/CampoTexto";
 import { EstadoUIRenderer } from "../components/EstadoUIRenderer";
 import { Icon } from "../components/Icon";
-import { BotonSalir } from "../components/BotonSalir";
 import { InterruptorTema } from "../components/InterruptorTema";
 import { Masthead } from "../components/Masthead";
 import { PedidoCard } from "../components/PedidoCard";
+import { TarjetaMetrica } from "../components/TarjetaMetrica";
 import { usePedidos } from "../context/PedidosContext";
 import { usePedidoPolling } from "../hooks/usePedidoPolling";
 import { vaciarPedidos } from "../services/pedidosApi";
@@ -60,7 +58,7 @@ interface AvisoAccion {
 export function LocalScreen() {
   const { width } = useWindowDimensions();
   const esAncho = width >= BREAKPOINTS.tablet;
-  const { colores, tipografia, modo } = useTema();
+  const { colores, tipografia, modo, puntoMinimo } = useTema();
   const { estado, estadisticas, recargar, crearOrden, avanzar, refrescando } =
     usePedidos();
 
@@ -79,17 +77,17 @@ export function LocalScreen() {
   const scrollCatalogoRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const scrollCatalogoX = useRef<number>(0);
 
-  const desplazarCatalogo = useCallback((direccion: "izq" | "der") => {
-    const paso = 220; // Ancho de tarjeta (~204px) + separación
-    const delta = direccion === "izq" ? -paso : paso;
+  const desplazarCatalogo = useCallback((direccionPaso: "izq" | "der") => {
+    const paso = 220;
+    const delta = direccionPaso === "izq" ? -paso : paso;
     const ref = scrollCatalogoRef.current as any;
     if (!ref) return;
 
-    // 1. Detección y ejecución para entorno Web (DOM Element / React Native Web)
     const domNode =
       typeof ref.getScrollableNode === "function"
         ? ref.getScrollableNode()
-        : ref._scrollNodeRef ?? (typeof ref.scrollBy === "function" || "scrollLeft" in ref ? ref : null);
+        : ref._scrollNodeRef ??
+          (typeof ref.scrollBy === "function" || "scrollLeft" in ref ? ref : null);
 
     if (domNode) {
       if (typeof domNode.scrollBy === "function") {
@@ -115,9 +113,8 @@ export function LocalScreen() {
       }
     }
 
-    // 2. Ejecución para React Native nativo (iOS / Android)
     const nuevoX =
-      direccion === "izq"
+      direccionPaso === "izq"
         ? Math.max(0, scrollCatalogoX.current - paso)
         : scrollCatalogoX.current + paso;
     scrollCatalogoX.current = nuevoX;
@@ -132,7 +129,6 @@ export function LocalScreen() {
   }, []);
 
   // ─── Polling solo mientras la pestaña está a la vista ─────────
-  // La bodega no necesita actualizarse en segundo plano: wasted battery.
   const [enFoco, setEnFoco] = useState(false);
   useFocusEffect(
     useCallback(() => {
@@ -148,7 +144,6 @@ export function LocalScreen() {
     intervaloLargo: 25_000,
   });
 
-  // El aviso se cierra solo.
   React.useEffect(() => {
     if (!aviso) return;
     const temporizador = setTimeout(() => setAviso(null), 6000);
@@ -173,7 +168,7 @@ export function LocalScreen() {
 
   const formatearPrecio = (valor: number) => "$" + valor.toLocaleString("es-CL");
 
-  // ─── Agregar prenda del catálogo rápido ────────────────────────
+  // ─── Agregar prenda del catálogo rápido ───────────────────────
   const agregarPrendaCatalogo = (cat: (typeof PRENDAS_CATALOGO)[0]) => {
     setItems((previos) => {
       const indice = previos.findIndex(
@@ -223,7 +218,9 @@ export function LocalScreen() {
     setItems((previos) =>
       previos
         .map((item, i) =>
-          i === indice ? { ...item, cantidad: Math.max(1, item.cantidad + delta) } : item
+          i === indice
+            ? { ...item, cantidad: Math.max(1, item.cantidad + delta) }
+            : item
         )
         .filter((item) => item.cantidad > 0)
     );
@@ -282,7 +279,11 @@ export function LocalScreen() {
             });
             setAviso((previo) =>
               previo
-                ? { ...previo, accion: undefined, mensaje: "Código copiado al portapapeles." }
+                ? {
+                    ...previo,
+                    accion: undefined,
+                    mensaje: "Código copiado al portapapeles.",
+                  }
                 : previo
             );
           },
@@ -319,7 +320,7 @@ export function LocalScreen() {
     });
   }, []);
 
-  // ─── Vaciar datos de despacho ───────────────────────────────
+  // ─── Vaciar datos de despacho ──────────────────────────────────
   const handleVaciarOrdenes = useCallback(async () => {
     await vaciarPedidos();
     await recargar();
@@ -330,7 +331,34 @@ export function LocalScreen() {
     });
   }, [recargar]);
 
-  // ─── Formulario de Registro de Despacho ─────────────────────────
+  // ─── Resumen de Métricas de Bodega ─────────────────────────────
+  const resumenMetricas = (
+    <View style={styles.metricasGrid}>
+      <TarjetaMetrica
+        etiqueta="Órdenes"
+        valor={estadisticas.total}
+        subtitulo="Registradas en turno"
+        icono="package"
+        tono="acento"
+      />
+      <TarjetaMetrica
+        etiqueta="En curso"
+        valor={estadisticas.activos}
+        subtitulo="Pendientes de entrega"
+        icono="truck"
+        tono="advertencia"
+      />
+      <TarjetaMetrica
+        etiqueta="Entregadas"
+        valor={estadisticas.entregados}
+        subtitulo="Completadas"
+        icono="circle-check"
+        tono="exito"
+      />
+    </View>
+  );
+
+  // ─── Formulario de Registro de Despacho ────────────────────────
   const formulario = (
     <View
       style={[
@@ -343,10 +371,24 @@ export function LocalScreen() {
         sombraTarjeta(modo),
       ]}
     >
-      <Text style={[tipografia.eyebrowMono, styles.eyebrow, { color: colores.acento }]}>
-        NUEVO DESPACHO
-      </Text>
-      <Text style={[tipografia.tituloDashboard, styles.tituloSeccion, { color: colores.tinta }]}>
+      <View
+        style={[
+          styles.badgeSeccion,
+          { backgroundColor: colores.acentoSuave, borderRadius: RADIOS.pill },
+        ]}
+      >
+        <Text style={[tipografia.eyebrowMono, { color: colores.acentoIntenso }]}>
+          NUEVO DESPACHO
+        </Text>
+      </View>
+
+      <Text
+        style={[
+          tipografia.tituloDashboard,
+          styles.tituloSeccion,
+          { color: colores.tinta },
+        ]}
+      >
         Crear orden de venta
       </Text>
 
@@ -381,46 +423,54 @@ export function LocalScreen() {
         autoCapitalize="words"
       />
 
-      {/* Catálogo rápido de prendas con flechas de navegación */}
+      {/* Catálogo rápido de prendas con flechas >= 44x44 */}
       <View style={styles.catalogoHeader}>
-        <Text style={[tipografia.eyebrowMono, styles.eyebrow, { color: colores.tintaTerciaria }]}>
-          AÑADIR PRENDAS RÁPIDAS
+        <Text
+          style={[
+            tipografia.eyebrowMono,
+            { color: colores.tintaTerciaria },
+          ]}
+        >
+          PRENDAS RÁPIDAS
         </Text>
         <View style={styles.catalogoFlechas}>
           <Pressable
             onPress={() => desplazarCatalogo("izq")}
-            hitSlop={10}
             accessibilityRole="button"
             accessibilityLabel="Desplazar catálogo a la izquierda"
             style={({ pressed }) => [
               styles.botonFlecha,
               {
+                minWidth: puntoMinimo,
+                minHeight: puntoMinimo,
                 borderColor: colores.borde,
-                backgroundColor: colores.superficie,
-                opacity: pressed ? 0.6 : 1,
+                backgroundColor: colores.superficieHundida,
+                opacity: pressed ? 0.65 : 1,
               },
             ]}
           >
-            <Icon name="chevron-left" size={16} color={colores.tinta} />
+            <Icon name="chevron-left" size={18} color={colores.tinta} />
           </Pressable>
           <Pressable
             onPress={() => desplazarCatalogo("der")}
-            hitSlop={10}
             accessibilityRole="button"
             accessibilityLabel="Desplazar catálogo a la derecha"
             style={({ pressed }) => [
               styles.botonFlecha,
               {
+                minWidth: puntoMinimo,
+                minHeight: puntoMinimo,
                 borderColor: colores.borde,
-                backgroundColor: colores.superficie,
-                opacity: pressed ? 0.6 : 1,
+                backgroundColor: colores.superficieHundida,
+                opacity: pressed ? 0.65 : 1,
               },
             ]}
           >
-            <Icon name="chevron-right" size={16} color={colores.tinta} />
+            <Icon name="chevron-right" size={18} color={colores.tinta} />
           </Pressable>
         </View>
       </View>
+
       <ScrollView
         ref={scrollCatalogoRef}
         horizontal
@@ -443,19 +493,49 @@ export function LocalScreen() {
                 backgroundColor: colores.superficieHundida,
                 borderColor: colores.borde,
                 borderRadius: RADIOS.md,
-                opacity: pressed ? 0.7 : 1,
+                opacity: pressed ? 0.75 : 1,
               },
             ]}
           >
-            <Icon name="plus" size={13} color={colores.acento} />
+            <View style={styles.prendaRapidaTop}>
+              <View
+                style={[
+                  styles.prendaTag,
+                  {
+                    backgroundColor: colores.acentoSuave,
+                    borderRadius: RADIOS.pill,
+                  },
+                ]}
+              >
+                <Icon name="plus" size={13} color={colores.acentoIntenso} />
+                <Text
+                  style={[
+                    tipografia.caption,
+                    { color: colores.acentoIntenso },
+                  ]}
+                >
+                  Talla {cat.talla}
+                </Text>
+              </View>
+              <Text style={[tipografia.micro, { color: colores.tinta }]}>
+                {formatearPrecio(cat.precio)}
+              </Text>
+            </View>
             <Text
-              style={[tipografia.cuerpoFuerte, styles.prendaRapidaNombre, { color: colores.tinta }]}
+              style={[
+                tipografia.cuerpoFuerte,
+                styles.prendaRapidaNombre,
+                { color: colores.tinta },
+              ]}
               numberOfLines={2}
             >
               {cat.nombre}
             </Text>
-            <Text style={[tipografia.caption, { color: colores.tintaTerciaria }]}>
-              Talla {cat.talla} · {formatearPrecio(cat.precio)}
+            <Text
+              style={[tipografia.caption, { color: colores.tintaSecundaria }]}
+              numberOfLines={1}
+            >
+              {cat.color}
             </Text>
           </Pressable>
         ))}
@@ -500,32 +580,55 @@ export function LocalScreen() {
           {
             backgroundColor: colores.superficieHundida,
             borderRadius: RADIOS.md,
-            borderColor: errorItems ? colores.error : "transparent",
+            borderColor: errorItems ? colores.error : colores.borde,
           },
         ]}
       >
         <View style={styles.panelPrendasEncabezado}>
-          <Text style={[tipografia.eyebrow, styles.eyebrow, { color: colores.tintaTerciaria }]}>
-            PAQUETE ({cantidadPrendas}{prendasPlural(cantidadPrendas)})
+          <Text
+            style={[
+              tipografia.eyebrowMono,
+              { color: colores.tintaSecundaria },
+            ]}
+          >
+            PAQUETE ({cantidadPrendas}
+            {prendasPlural(cantidadPrendas)})
           </Text>
-          <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
+          <Text style={[tipografia.subtitulo, { color: colores.tinta }]}>
             {formatearPrecio(totalEstimado)}
           </Text>
         </View>
 
         {items.length === 0 ? (
-          <Text style={[tipografia.caption, { color: colores.tintaTerciaria }]}>
+          <Text
+            style={[tipografia.caption, { color: colores.tintaSecundaria }]}
+          >
             El paquete está vacío. Agrega prendas desde el catálogo o a mano.
           </Text>
         ) : null}
 
         {items.map((item, indice) => (
-          <View key={`${item.nombre}-${indice}`} style={styles.prendaItemFila}>
+          <View
+            key={`${item.nombre}-${indice}`}
+            style={[
+              styles.prendaItemTarjeta,
+              {
+                backgroundColor: colores.superficie,
+                borderColor: colores.borde,
+                borderRadius: RADIOS.sm,
+              },
+            ]}
+          >
             <View style={styles.prendaItemTexto}>
-              <Text style={[tipografia.etiqueta, { color: colores.tinta }]} numberOfLines={1}>
+              <Text
+                style={[tipografia.etiqueta, { color: colores.tinta }]}
+                numberOfLines={1}
+              >
                 {item.nombre}
               </Text>
-              <Text style={[tipografia.caption, { color: colores.tintaSecundaria }]}>
+              <Text
+                style={[tipografia.caption, { color: colores.tintaSecundaria }]}
+              >
                 {[item.talla ? `Talla ${item.talla}` : null, item.color]
                   .filter(Boolean)
                   .join(" · ")}
@@ -540,16 +643,24 @@ export function LocalScreen() {
                 style={({ pressed }) => [
                   styles.stepperBoton,
                   {
+                    minWidth: puntoMinimo,
+                    minHeight: puntoMinimo,
                     borderColor: colores.borde,
-                    backgroundColor: colores.superficie,
-                    opacity: pressed ? 0.6 : 1,
+                    backgroundColor: colores.superficieHundida,
+                    opacity: pressed ? 0.65 : 1,
                   },
                 ]}
               >
-                <Icon name="minus" size={13} color={colores.tinta} />
+                <Icon name="minus" size={15} color={colores.tinta} />
               </Pressable>
 
-              <Text style={[tipografia.etiqueta, styles.stepperCantidad, { color: colores.tinta }]}>
+              <Text
+                style={[
+                  tipografia.micro,
+                  styles.stepperCantidad,
+                  { color: colores.tinta },
+                ]}
+              >
                 {item.cantidad}
               </Text>
 
@@ -560,35 +671,45 @@ export function LocalScreen() {
                 style={({ pressed }) => [
                   styles.stepperBoton,
                   {
+                    minWidth: puntoMinimo,
+                    minHeight: puntoMinimo,
                     borderColor: colores.borde,
-                    backgroundColor: colores.superficie,
-                    opacity: pressed ? 0.6 : 1,
+                    backgroundColor: colores.superficieHundida,
+                    opacity: pressed ? 0.65 : 1,
                   },
                 ]}
               >
-                <Icon name="plus" size={13} color={colores.tinta} />
+                <Icon name="plus" size={15} color={colores.tinta} />
+              </Pressable>
+
+              <Pressable
+                onPress={() => eliminarItem(indice)}
+                accessibilityRole="button"
+                accessibilityLabel={`Eliminar ${item.nombre} del paquete`}
+                style={({ pressed }) => [
+                  styles.eliminarItem,
+                  {
+                    minWidth: puntoMinimo,
+                    minHeight: puntoMinimo,
+                    opacity: pressed ? 0.65 : 1,
+                  },
+                ]}
+              >
+                <Icon name="trash-2" size={16} color={colores.error} />
               </Pressable>
             </View>
-
-            <Pressable
-              onPress={() => eliminarItem(indice)}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel={`Eliminar ${item.nombre} del paquete`}
-              style={({ pressed }) => [
-                styles.eliminarItem,
-                { opacity: pressed ? 0.6 : 1 },
-              ]}
-            >
-              <Icon name="trash-2" size={15} color={colores.tintaTerciaria} />
-            </Pressable>
           </View>
         ))}
 
         {errorItems ? (
           <View style={styles.errorFila}>
-            <Icon name="circle-alert" size={13} color={colores.error} />
-            <Text style={[tipografia.caption, { color: colores.error }]}>{errorItems}</Text>
+            <Icon name="circle-alert" size={14} color={colores.error} />
+            <Text
+              accessibilityRole="alert"
+              style={[tipografia.caption, { color: colores.error, flex: 1 }]}
+            >
+              {errorItems}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -626,13 +747,19 @@ export function LocalScreen() {
               style={({ pressed }) => [
                 styles.botonIcono,
                 {
+                  minWidth: puntoMinimo,
+                  minHeight: puntoMinimo,
                   borderColor: colores.borde,
                   backgroundColor: colores.superficie,
                   opacity: pressed ? 0.7 : 1,
                 },
               ]}
             >
-              <Icon name="rotate-ccw" size={16} color={colores.tintaSecundaria} />
+              <Icon
+                name="rotate-ccw"
+                size={17}
+                color={colores.tintaSecundaria}
+              />
             </Pressable>
           ) : undefined
         }
@@ -660,7 +787,13 @@ export function LocalScreen() {
             />
           ))}
           {refrescando ? (
-            <Text style={[tipografia.caption, styles.actualizando, { color: colores.tintaTerciaria }]}>
+            <Text
+              style={[
+                tipografia.caption,
+                styles.actualizando,
+                { color: colores.tintaTerciaria },
+              ]}
+            >
               Actualizando…
             </Text>
           ) : null}
@@ -670,7 +803,10 @@ export function LocalScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colores.fondo }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: colores.fondo }]}
+      edges={["top"]}
+    >
       <AvisoFlotante
         visible={aviso !== null}
         tono={aviso?.tono ?? "info"}
@@ -686,21 +822,21 @@ export function LocalScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         {esAncho ? (
-          // Tablet / desktop: cabecera a lo ancho, luego dos columnas.
           <View style={styles.layoutAncho}>
             <View style={styles.marcaAncho}>
               <Masthead
-                eyebrow="Atelier Noir · Panel de bodega"
+                eyebrow="Atelier Noir · Bodega"
                 titulo="Bodega y despacho"
                 variante="tecnico"
                 descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
                 acciones={
-                <>
-                  <BotonSalir />
-                  <InterruptorTema />
-                </>
-              }
+                  <>
+                    <BotonSalir />
+                    <InterruptorTema />
+                  </>
+                }
               />
+              {resumenMetricas}
             </View>
 
             <View style={styles.columnasAncho}>
@@ -708,13 +844,19 @@ export function LocalScreen() {
                 ref={scrollFormRef}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={[styles.columnaScroll, styles.columnaFormulario]}
+                contentContainerStyle={[
+                  styles.columnaScroll,
+                  styles.columnaFormulario,
+                ]}
               >
                 {formulario}
               </ScrollView>
               <ScrollView
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={[styles.columnaScroll, styles.columnaLista]}
+                contentContainerStyle={[
+                  styles.columnaScroll,
+                  styles.columnaLista,
+                ]}
               >
                 {encabezadoLista}
                 {listaPedidos}
@@ -722,7 +864,6 @@ export function LocalScreen() {
             </View>
           </View>
         ) : (
-          // Móvil: una sola columna con scroll continuo.
           <ScrollView
             ref={scrollFormRef}
             showsVerticalScrollIndicator={false}
@@ -730,7 +871,7 @@ export function LocalScreen() {
             contentContainerStyle={styles.scrollMovil}
           >
             <Masthead
-              eyebrow="Atelier Noir · Panel de bodega"
+              eyebrow="Atelier Noir · Bodega"
               titulo="Bodega y despacho"
               variante="tecnico"
               descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
@@ -741,6 +882,7 @@ export function LocalScreen() {
                 </>
               }
             />
+            {resumenMetricas}
             {formulario}
             {encabezadoLista}
             {listaPedidos}
@@ -779,6 +921,11 @@ const styles = StyleSheet.create({
     maxWidth: 1180,
     alignSelf: "center",
   },
+  metricasGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: ESPACIOS.md,
+  },
   columnasAncho: {
     flex: 1,
     flexDirection: "row",
@@ -792,7 +939,7 @@ const styles = StyleSheet.create({
   },
   columnaFormulario: {
     flex: 1,
-    maxWidth: 460,
+    maxWidth: 480,
   },
   columnaLista: {
     flex: 1.15,
@@ -802,9 +949,11 @@ const styles = StyleSheet.create({
     padding: ESPACIOS.lg,
     borderWidth: 1,
   },
-  eyebrow: {
-    letterSpacing: 1.6,
-    marginBottom: ESPACIOS.xs,
+  badgeSeccion: {
+    alignSelf: "flex-start",
+    paddingHorizontal: ESPACIOS.sm + 2,
+    paddingVertical: ESPACIOS.xs,
+    marginBottom: ESPACIOS.sm,
   },
   tituloSeccion: {
     marginBottom: ESPACIOS.lg,
@@ -818,11 +967,9 @@ const styles = StyleSheet.create({
   catalogoFlechas: {
     flexDirection: "row",
     alignItems: "center",
-    gap: ESPACIOS.xs,
+    gap: ESPACIOS.sm,
   },
   botonFlecha: {
-    width: 34,
-    height: 34,
     borderRadius: RADIOS.pill,
     borderWidth: 1,
     alignItems: "center",
@@ -835,15 +982,27 @@ const styles = StyleSheet.create({
     paddingBottom: ESPACIOS.md,
   },
   prendaRapida: {
-    width: 204,
+    width: 214,
     padding: ESPACIOS.md,
     borderWidth: 1,
-    gap: ESPACIOS.xs,
+    gap: ESPACIOS.xs + 2,
     cursor: "pointer",
   },
+  prendaRapidaTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: ESPACIOS.xs,
+  },
+  prendaTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: ESPACIOS.sm,
+    paddingVertical: 3,
+  },
   prendaRapidaNombre: {
-    letterSpacing: -0.1,
-    minHeight: 44,
+    minHeight: 42,
   },
   filaManual: {
     flexDirection: "row",
@@ -863,7 +1022,7 @@ const styles = StyleSheet.create({
   },
   panelPrendas: {
     padding: ESPACIOS.md,
-    borderWidth: 1.5,
+    borderWidth: 1,
     gap: ESPACIOS.sm,
     marginBottom: ESPACIOS.lg,
   },
@@ -872,23 +1031,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  prendaItemFila: {
-    flexDirection: "row",
-    alignItems: "center",
+  prendaItemTarjeta: {
+    padding: ESPACIOS.sm + 2,
+    borderWidth: 1,
     gap: ESPACIOS.sm,
   },
   prendaItemTexto: {
-    flex: 1,
-    minWidth: 0,
+    gap: 2,
   },
   stepper: {
     flexDirection: "row",
     alignItems: "center",
-    gap: ESPACIOS.xs + 2,
+    gap: ESPACIOS.sm,
   },
   stepperBoton: {
-    width: 30,
-    height: 30,
     borderRadius: RADIOS.sm,
     borderWidth: 1,
     alignItems: "center",
@@ -896,11 +1052,13 @@ const styles = StyleSheet.create({
     cursor: "pointer",
   },
   stepperCantidad: {
-    minWidth: 18,
+    minWidth: 22,
     textAlign: "center",
   },
   eliminarItem: {
-    padding: ESPACIOS.sm,
+    marginLeft: "auto",
+    alignItems: "center",
+    justifyContent: "center",
     cursor: "pointer",
   },
   errorFila: {
@@ -912,16 +1070,9 @@ const styles = StyleSheet.create({
     marginTop: ESPACIOS.xs,
   },
   listaEncabezado: {
-    marginTop: ESPACIOS.lg,
-  },
-  accionesLista: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: ESPACIOS.sm,
+    marginTop: ESPACIOS.xs,
   },
   botonIcono: {
-    width: 44,
-    height: 44,
     borderRadius: RADIOS.pill,
     borderWidth: 1,
     alignItems: "center",

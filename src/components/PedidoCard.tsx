@@ -1,22 +1,21 @@
 // ─── Tarjeta de pedido (vista de bodega) ─────────────────────────
 //
-// Tarjeta densa pero escaneable: la orden y su estado arriba, el
-// destinatario al medio, el contenido y el total abajo, y una única
-// acción primaria (avanzar el estado).
+// Referencia Atelier Noir: borde 1px --line, radio 24px, código en
+// DM Mono, píldora de estado, desglose de prendas y acción única clara.
 
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { Boton } from "./Boton";
 import { EstadoPedidoBadge } from "./EstadoPedidoBadge";
 import { Icon } from "./Icon";
 import { useTema } from "../theme/ThemeProvider";
-import { ESPACIOS, RADIOS, sombraTarjeta } from "../theme/tokens";
+import { ESPACIOS, FUENTES, RADIOS, sombraTarjeta } from "../theme/tokens";
 import {
   ETIQUETAS_ESTADO,
   FLUJO_ESTADOS,
   Pedido,
 } from "../types/pedido";
-import { Boton } from "./Boton";
 
 interface Props {
   pedido: Pedido;
@@ -28,13 +27,19 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
   const { colores, tipografia, modo } = useTema();
   const indiceActual = FLUJO_ESTADOS.indexOf(pedido.estado);
   const esUltimoEstado = indiceActual === FLUJO_ESTADOS.length - 1;
-  const siguienteEstado = esUltimoEstado ? null : FLUJO_ESTADOS[indiceActual + 1];
+  const siguienteEstado = esUltimoEstado
+    ? null
+    : FLUJO_ESTADOS[indiceActual + 1];
 
   const formatearPrecio = (valor: number) =>
     "$" + valor.toLocaleString("es-CL");
 
-  // El botón de avance se pinta con el color del estado siguiente.
-  // Ese color lo decide el tema, así que no hay que ajustar nada aquí.
+  // Color AA-seguro para el botón de avance según el siguiente estado.
+  const fondoAvance = siguienteEstado
+    ? siguienteEstado === "listo"
+      ? colores.primario
+      : colores.estado[siguienteEstado]
+    : colores.primario;
 
   return (
     <View
@@ -48,42 +53,66 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
         sombraTarjeta(modo),
       ]}
     >
-      {/* Encabezado: orden + estado */}
+      {/* Encabezado: código + píldora de estado */}
       <View style={styles.encabezado}>
         <View style={styles.bloqueCodigo}>
-          <Text style={[tipografia.eyebrowMono, styles.eyebrow, { color: colores.tintaTerciaria }]}>
+          <Text
+            style={[
+              tipografia.eyebrowMono,
+              { color: colores.tintaTerciaria },
+            ]}
+          >
             ORDEN
           </Text>
-          <Text style={[tipografia.codigo, styles.codigo, { color: colores.tinta }]}>
+          <Text
+            style={[
+              tipografia.codigo,
+              styles.codigo,
+              { color: colores.tinta },
+            ]}
+          >
             #{pedido.codigo}
           </Text>
         </View>
         <EstadoPedidoBadge estado={pedido.estado} compacto />
       </View>
 
-      {/* Destinatario */}
+      {/* Destinatario y ruta */}
       <View style={styles.bloqueCliente}>
         <View style={styles.lineaDato}>
-          <Icon name="user" size={14} color={colores.tintaTerciaria} />
+          <Icon name="user" size={15} color={colores.tintaTerciaria} />
           <Text
-            style={[tipografia.cuerpoFuerte, styles.textoDato, { color: colores.tinta }]}
+            style={[
+              tipografia.cuerpoFuerte,
+              styles.textoDato,
+              { color: colores.tinta },
+            ]}
             numberOfLines={1}
           >
             {pedido.clienteNombre}
           </Text>
         </View>
         <View style={styles.lineaDato}>
-          <Icon name="map-pin" size={14} color={colores.tintaTerciaria} />
+          <Icon name="map-pin" size={15} color={colores.tintaTerciaria} />
           <Text
-            style={[tipografia.caption, styles.textoDato, { color: colores.tintaSecundaria }]}
+            style={[
+              tipografia.caption,
+              styles.textoDato,
+              { color: colores.tintaSecundaria },
+            ]}
             numberOfLines={2}
           >
             {pedido.direccionDespacho}, {pedido.comuna}
           </Text>
         </View>
         <View style={styles.lineaDato}>
-          <Icon name="truck" size={14} color={colores.acento} />
-          <Text style={[tipografia.caption, styles.textoDato, { color: colores.acento }]}>
+          <Icon name="truck" size={15} color={colores.acentoIntenso} />
+          <Text
+            style={[
+              tipografia.caption,
+              { color: colores.acentoIntenso, fontFamily: FUENTES.semi },
+            ]}
+          >
             {pedido.metodoEnvio}
           </Text>
         </View>
@@ -93,10 +122,19 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
       <View
         style={[
           styles.panel,
-          { backgroundColor: colores.superficieHundida, borderRadius: RADIOS.md },
+          {
+            backgroundColor: colores.superficieHundida,
+            borderColor: colores.borde,
+            borderRadius: RADIOS.md,
+          },
         ]}
       >
-        <Text style={[tipografia.micro, styles.eyebrow, { color: colores.tintaTerciaria }]}>
+        <Text
+          style={[
+            tipografia.micro,
+            { color: colores.tintaTerciaria },
+          ]}
+        >
           PRENDAS ({pedido.items.length})
         </Text>
 
@@ -104,13 +142,22 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
           <View key={`${item.nombre}-${i}`} style={styles.itemFila}>
             <View style={styles.itemDetalle}>
               <Text
-                style={[tipografia.etiqueta, styles.itemNombre, { color: colores.tinta }]}
+                style={[
+                  tipografia.etiqueta,
+                  styles.itemNombre,
+                  { color: colores.tinta },
+                ]}
                 numberOfLines={1}
               >
                 {item.cantidad}× {item.nombre}
               </Text>
               {(item.talla || item.color) && (
-                <Text style={[tipografia.caption, { color: colores.tintaSecundaria }]}>
+                <Text
+                  style={[
+                    tipografia.caption,
+                    { color: colores.tintaSecundaria },
+                  ]}
+                >
                   {[item.talla ? `Talla ${item.talla}` : null, item.color]
                     .filter(Boolean)
                     .join(" · ")}
@@ -118,7 +165,12 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
               )}
             </View>
             {item.precioUnitario ? (
-              <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
+              <Text
+                style={[
+                  tipografia.micro,
+                  { color: colores.tinta },
+                ]}
+              >
                 {formatearPrecio(item.precioUnitario * item.cantidad)}
               </Text>
             ) : null}
@@ -126,7 +178,9 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
         ))}
 
         <View style={[styles.totalFila, { borderTopColor: colores.borde }]}>
-          <Text style={[tipografia.etiqueta, { color: colores.tintaSecundaria }]}>
+          <Text
+            style={[tipografia.etiqueta, { color: colores.tintaSecundaria }]}
+          >
             Total
           </Text>
           <Text style={[tipografia.subtitulo, { color: colores.tinta }]}>
@@ -144,8 +198,8 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
           style={[
             styles.botonAvanzar,
             {
-              backgroundColor: colores.estado[siguienteEstado],
-              borderRadius: RADIOS.md,
+              backgroundColor: fondoAvance,
+              borderRadius: RADIOS.sm,
             },
           ]}
           accessibilityLabel={`Avanzar pedido ${pedido.codigo} a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
@@ -157,11 +211,16 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
             styles.selloEntregado,
             {
               backgroundColor: colores.estadoSuave.entregado,
-              borderRadius: RADIOS.md,
+              borderColor: colores.borde,
+              borderRadius: RADIOS.sm,
             },
           ]}
         >
-          <Icon name="circle-check" size={16} color={colores.estado.entregado} />
+          <Icon
+            name="circle-check"
+            size={16}
+            color={colores.estado.entregado}
+          />
           <Text
             style={[tipografia.etiqueta, { color: colores.estado.entregado }]}
           >
@@ -211,11 +270,8 @@ const styles = StyleSheet.create({
     alignItems: "baseline",
     gap: ESPACIOS.sm,
   },
-  eyebrow: {
-    letterSpacing: 1.3,
-  },
   codigo: {
-    letterSpacing: 1,
+    letterSpacing: 1.2,
   },
   bloqueCliente: {
     marginTop: ESPACIOS.md,
@@ -233,6 +289,7 @@ const styles = StyleSheet.create({
   panel: {
     marginTop: ESPACIOS.md,
     padding: ESPACIOS.md,
+    borderWidth: 1,
     gap: ESPACIOS.sm,
   },
   itemFila: {
@@ -261,11 +318,13 @@ const styles = StyleSheet.create({
   },
   selloEntregado: {
     marginTop: ESPACIOS.md,
+    borderWidth: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: ESPACIOS.sm,
-    paddingVertical: ESPACIOS.md,
+    minHeight: 44,
+    paddingVertical: ESPACIOS.sm,
   },
   pie: {
     marginTop: ESPACIOS.sm,

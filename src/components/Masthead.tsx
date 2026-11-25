@@ -1,27 +1,27 @@
-// ─── Cabecera editorial (masthead) ──────────────────────────────
+// ─── Cabecera de pantalla (Masthead) ─────────────────────────────
 //
-// El "titular" de cada pantalla: kicker en versalitas, titular en serif,
-// bajada en sans. Es el ancla visual que le da a la app aire de revista
-// y no de panel de control genérico.
+// Referencia Atelier Noir: etiqueta superior en DM Mono uppercase,
+// titular geométrico en Space Grotesk con tracking negativo y bajada
+// legible en Manrope (>= 14px).
 
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { useTema } from "../theme/ThemeProvider";
-import { ESPACIOS } from "../theme/tokens";
+import { ESPACIOS, RADIOS } from "../theme/tokens";
 
 interface Props {
-  /** Kicker: contexto corto en versalitas (ej. "SEGUIMIENTO DE COMPRA"). */
+  /** Contexto corto en mayúsculas (ej. "SEGUIMIENTO DE COMPRA"). */
   eyebrow: string;
-  /** Titular de la pantalla. */
+  /** Titular principal de la pantalla. */
   titulo: string;
   /** Bajada opcional. */
   descripcion?: string;
-  /** Acción a la derecha (por ejemplo, el interruptor de tema). */
+  /** Acciones a la derecha (ej. interruptor de tema, botón salir). */
   acciones?: React.ReactNode;
-  /** Alineación del bloque. */
+  /** Alineación centrada del bloque. */
   centrado?: boolean;
-  /** Variante visual: editorial (Playfair Display) o técnico (Inter 700 + JetBrains Mono). */
+  /** Variante visual (conservada por compatibilidad de props). */
   variante?: "editorial" | "tecnico";
 }
 
@@ -31,25 +31,36 @@ export function Masthead({
   descripcion,
   acciones,
   centrado = false,
-  variante = "editorial",
+  variante = "tecnico",
 }: Props) {
   const { colores, tipografia } = useTema();
   const esTecnico = variante === "tecnico";
 
   return (
     <View style={[styles.contenedor, centrado && styles.centrado]}>
-      <View style={styles.filaTexto}>
-        <Text
+      <View style={[styles.filaTexto, centrado && styles.filaCentrada]}>
+        <View
           style={[
-            esTecnico ? tipografia.eyebrowMono : tipografia.eyebrow,
-            styles.eyebrow,
-            { color: colores.acento },
+            styles.kickerPill,
+            {
+              backgroundColor: colores.acentoSuave,
+              borderRadius: RADIOS.pill,
+            },
           ]}
         >
-          {eyebrow.toUpperCase()}
-        </Text>
+          <View style={[styles.kickerPunto, { backgroundColor: colores.acento }]} />
+          <Text
+            style={[
+              esTecnico ? tipografia.eyebrowMono : tipografia.eyebrow,
+              { color: colores.acentoIntenso },
+            ]}
+          >
+            {eyebrow.toUpperCase()}
+          </Text>
+        </View>
 
         <Text
+          accessibilityRole="header"
           style={[
             esTecnico ? tipografia.tituloDashboard : tipografia.display,
             styles.titulo,
@@ -95,9 +106,21 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "flex-start",
   },
-  eyebrow: {
-    marginBottom: ESPACIOS.xs + 2,
-    textAlign: "left",
+  filaCentrada: {
+    alignItems: "center",
+  },
+  kickerPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: ESPACIOS.xs + 2,
+    paddingHorizontal: ESPACIOS.sm + 2,
+    paddingVertical: ESPACIOS.xs,
+    marginBottom: ESPACIOS.sm,
+  },
+  kickerPunto: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   titulo: {
     marginBottom: ESPACIOS.xs + 2,

@@ -1,12 +1,13 @@
 // ─── Campo de texto ──────────────────────────────────────────────
 //
-// Campo con etiqueta visible, icono opcional, ayuda, error y estado de
-// foco. Nunca se usa un <TextInput> pelado en la app: un campo sin
-// etiqueta ni error es un campo que el usuario no entiende.
+// Campo con etiqueta visible en DM Mono uppercase, icono opcional,
+// toggle accesible para contraseñas, ayuda, error y borde cobalto al
+// enfocar. Área táctil >= 44pt garantizada.
 
 import React, { useState } from "react";
 import {
   KeyboardTypeOptions,
+  Pressable,
   ReturnKeyTypeOptions,
   StyleSheet,
   Text,
@@ -59,6 +60,7 @@ export function CampoTexto({
 }: Props) {
   const { colores, tipografia, puntoMinimo } = useTema();
   const [enfocado, setEnfocado] = useState(false);
+  const [mostrarClave, setMostrarClave] = useState(false);
 
   const colorBorde = error
     ? colores.error
@@ -68,7 +70,13 @@ export function CampoTexto({
 
   return (
     <View style={styles.contenedor}>
-      <Text style={[tipografia.micro, styles.etiqueta, { color: colores.tintaSecundaria }]}>
+      <Text
+        style={[
+          tipografia.micro,
+          styles.etiqueta,
+          { color: colores.tintaSecundaria },
+        ]}
+      >
         {etiqueta.toUpperCase()}
       </Text>
 
@@ -76,21 +84,29 @@ export function CampoTexto({
         style={[
           styles.contenedorInput,
           {
-            backgroundColor: colores.superficie,
+            backgroundColor: enfocado ? colores.superficie : colores.superficieHundida,
             borderColor: colorBorde,
-            borderRadius: RADIOS.md,
+            borderRadius: RADIOS.sm,
             borderWidth: enfocado || error ? 1.5 : 1,
-            minHeight: multilinea ? puntoMinimo * 1.6 : puntoMinimo,
+            minHeight: multilinea ? puntoMinimo * 1.65 : Math.max(puntoMinimo, 48),
             alignItems: multilinea ? "flex-start" : "center",
           },
         ]}
       >
         {icono ? (
-          <Icon
-            name={icono}
-            size={17}
-            color={error ? colores.error : colores.tintaTerciaria}
-          />
+          <View style={multilinea ? styles.iconoMultilinea : undefined}>
+            <Icon
+              name={icono}
+              size={17}
+              color={
+                error
+                  ? colores.error
+                  : enfocado
+                    ? colores.acentoIntenso
+                    : colores.tintaTerciaria
+              }
+            />
+          </View>
         ) : null}
 
         <TextInput
@@ -109,7 +125,7 @@ export function CampoTexto({
           placeholderTextColor={colores.tintaTerciaria}
           multiline={multilinea}
           maxLength={maxLength}
-          secureTextEntry={secureTextEntry}
+          secureTextEntry={secureTextEntry && !mostrarClave}
           autoCapitalize={autoCapitalize}
           autoCorrect={autoCorrect}
           keyboardType={keyboardType}
@@ -123,17 +139,50 @@ export function CampoTexto({
           accessibilityLabel={accessibilityLabel ?? etiqueta}
           accessibilityHint={ayuda}
         />
+
+        {secureTextEntry ? (
+          <Pressable
+            onPress={() => setMostrarClave((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              mostrarClave ? "Ocultar contraseña" : "Mostrar contraseña"
+            }
+            style={({ pressed }) => [
+              styles.botonOjo,
+              {
+                minWidth: puntoMinimo,
+                minHeight: puntoMinimo,
+                opacity: pressed ? 0.65 : 1,
+              },
+            ]}
+          >
+            <Icon
+              name={mostrarClave ? "eye-off" : "eye"}
+              size={17}
+              color={colores.tintaSecundaria}
+            />
+          </Pressable>
+        ) : null}
       </View>
 
       {error ? (
         <View style={styles.pieAyuda}>
-          <Icon name="circle-alert" size={13} color={colores.error} />
-          <Text style={[tipografia.caption, styles.textoAyuda, { color: colores.error }]}>
+          <Icon name="circle-alert" size={14} color={colores.error} />
+          <Text
+            accessibilityRole="alert"
+            style={[tipografia.caption, styles.textoAyuda, { color: colores.error }]}
+          >
             {error}
           </Text>
         </View>
       ) : ayuda ? (
-        <Text style={[tipografia.caption, styles.textoAyuda, { color: colores.tintaTerciaria }]}>
+        <Text
+          style={[
+            tipografia.caption,
+            styles.textoAyuda,
+            { color: colores.tintaSecundaria, marginTop: ESPACIOS.xs + 2 },
+          ]}
+        >
           {ayuda}
         </Text>
       ) : null}
@@ -146,13 +195,17 @@ const styles = StyleSheet.create({
     marginBottom: ESPACIOS.md,
   },
   etiqueta: {
-    letterSpacing: 1.3,
-    marginBottom: ESPACIOS.xs + 1,
+    letterSpacing: 0.9,
+    marginBottom: ESPACIOS.xs + 2,
   },
   contenedorInput: {
     flexDirection: "row",
     gap: ESPACIOS.sm,
-    paddingHorizontal: ESPACIOS.md,
+    paddingLeft: ESPACIOS.md,
+    paddingRight: ESPACIOS.xs,
+  },
+  iconoMultilinea: {
+    paddingTop: ESPACIOS.md,
   },
   input: {
     flex: 1,
@@ -160,6 +213,11 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     padding: 0,
     margin: 0,
+  },
+  botonOjo: {
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
   },
   pieAyuda: {
     flexDirection: "row",

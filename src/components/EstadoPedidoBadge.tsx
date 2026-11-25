@@ -1,8 +1,8 @@
-// ─── Badge de estado ─────────────────────────────────────────────
+// ─── Píldora de estado de pedido ─────────────────────────────────
 //
-// Cada estado tiene color, icono y texto. El color nunca viaja solo:
-// el icono y la etiqueta hacen que el estado se lea también en escala
-// de grises o con daltonismo.
+// Referencia visual Atelier Noir: píldora con borde sutil 1px, fondo
+// suave tintado, indicador de punto vivo e icono + etiqueta en DM Mono.
+// El color nunca viaja solo: icono y etiqueta aseguran lectura AA.
 
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -23,7 +23,8 @@ interface Props {
 
 export function EstadoPedidoBadge({ estado, compacto = false }: Props) {
   const { colores, tipografia } = useTema();
-  const color = colores.estado[estado];
+  const colorTexto = colores.estado[estado];
+  const colorPunto = colores.puntoEstado[estado];
 
   return (
     <View
@@ -31,7 +32,7 @@ export function EstadoPedidoBadge({ estado, compacto = false }: Props) {
         styles.badge,
         {
           backgroundColor: colores.estadoSuave[estado],
-          borderColor: color,
+          borderColor: colores.borde,
           borderRadius: RADIOS.pill,
         },
         compacto && styles.badgeCompacto,
@@ -39,12 +40,16 @@ export function EstadoPedidoBadge({ estado, compacto = false }: Props) {
       accessibilityRole="text"
       accessibilityLabel={`Estado del pedido: ${ETIQUETAS_ESTADO[estado]}`}
     >
+      <View style={[styles.punto, { backgroundColor: colorPunto }]} />
       <Icon
         name={ICONOS_ESTADO[estado]}
-        size={compacto ? 12 : 14}
-        color={color}
+        size={compacto ? 13 : 14}
+        color={colorTexto}
       />
-      <Text style={[tipografia.micro, styles.texto, { color }]} numberOfLines={1}>
+      <Text
+        style={[tipografia.micro, styles.texto, { color: colorTexto }]}
+        numberOfLines={1}
+      >
         {ETIQUETAS_ESTADO[estado]}
       </Text>
     </View>
@@ -57,15 +62,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     paddingHorizontal: ESPACIOS.md,
-    paddingVertical: ESPACIOS.xs + 2,
+    paddingVertical: ESPACIOS.xs + 3,
     borderWidth: 1,
     gap: ESPACIOS.xs + 2,
   },
   badgeCompacto: {
     paddingHorizontal: ESPACIOS.sm + 2,
-    paddingVertical: ESPACIOS.xs,
+    paddingVertical: ESPACIOS.xs + 1,
+  },
+  punto: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
   texto: {
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
 });
