@@ -10,6 +10,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -23,6 +24,7 @@ import {
 import {
   calcularAnaliticaOperacion,
   obtenerCatalogoConStock,
+  reponerStockSku,
   suscribirStock,
 } from "../services/operacionesMock";
 import {
@@ -67,6 +69,7 @@ interface ValorPedidos {
     opciones?: CrearPedidoOpciones
   ) => Promise<ResultadoAccion>;
   avanzar: (codigo: string) => Promise<ResultadoAccion>;
+  reponerStock: (sku: string, cantidad: number) => number | null;
 }
 
 const ContextoPedidos = createContext<ValorPedidos | null>(null);
@@ -82,12 +85,17 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
   const [ultimaActualizacion, setUltimaActualizacion] = useState<number | null>(
     null
   );
+  const recargaSeqRef = useRef(0);
+  const omitirSiguienteEventoRef = useRef(false);
 
   const recargar = useCallback(async () => {
+    const seq = ++recargaSeqRef.current;
     await Promise.resolve();
+    if (seq !== recargaSeqRef.current) return;
     setRefrescando(true);
     try {
       const res = await obtenerPedidos();
+      if (seq !== recargaSeqRef.current) return;
       if (!res.ok) {
         setEstado({
           tipo: "error",
@@ -107,12 +115,15 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       );
       setUltimaActualizacion(Date.now());
     } catch {
+      if (seq !== recargaSeqRef.current) return;
       setEstado({
         tipo: "error",
         mensaje: "Error de red al consultar los despachos.",
       });
     } finally {
-      setRefrescando(false);
+      if (seq === recargaSeqRef.current) {
+        setRefrescando(false);
+      }
     }
   }, []);
 
@@ -133,7 +144,12 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
     inicializar();
 
     const unsubPedidos = suscribirACambios(() => {
-      if (!cancelado) void recargar();
+      if (cancelado) return;
+      if (omitirSiguienteEventoRef.current) {
+        omitirSiguienteEventoRef.current = false;
+        return;
+      }
+      void recargar();
     });
     const unsubStock = suscribirStock(() => {
       if (!cancelado) setCatalogo(obtenerCatalogoConStock());
@@ -156,6 +172,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       opciones?: CrearPedidoOpciones
     ): Promise<ResultadoAccion> => {
       try {
+        omitirSiguienteEventoRef.current = true;
         const res = await crearPedido(
           nombre,
           direccion,
@@ -165,6 +182,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
           opciones
         );
         if (!res.ok) {
+          omitirSiguienteEventoRef.current = false;
           return {
             ok: false,
             errorCode: res.errorCode,
@@ -180,6 +198,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
         await recargar();
         return { ok: true, codigo: res.data.codigo, pedido: res.data };
       } catch {
+        omitirSiguienteEventoRef.current = false;
         return {
           ok: false,
           mensaje: "Fallo de conexión al enviar el pedido al servidor.",
@@ -192,8 +211,10 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
   const avanzar = useCallback(
     async (codigo: string): Promise<ResultadoAccion> => {
       try {
+        omitirSiguienteEventoRef.current = true;
         const res = await avanzarEstado(codigo);
         if (!res.ok) {
+          omitirSiguienteEventoRef.current = false;
           return {
             ok: false,
             mensaje: `No se pudo actualizar la orden ${codigo} (${res.status}).`,
@@ -202,11 +223,16 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
         await recargar();
         return { ok: true };
       } catch {
+        omitirSiguienteEventoRef.current = false;
         return { ok: false, mensaje: "Error de red al actualizar el estado." };
       }
     },
     [recargar]
   );
+
+  const reponerStock = useCallback((sku: string, cantidad: number) => {
+    return reponerStockSku(sku, cantidad);
+  }, []);
 
   const pedidos = useMemo(
     () => (estado.tipo === "datos" ? estado.datos : []),
@@ -239,6 +265,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       recargar,
       crearOrden,
       avanzar,
+      reponerStock,
     }),
     [
       estado,
@@ -251,6 +278,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       recargar,
       crearOrden,
       avanzar,
+      reponerStock,
     ]
   );
 

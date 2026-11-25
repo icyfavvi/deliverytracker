@@ -1,10 +1,13 @@
 // ─── Capa de Servicios: E-commerce de Ropa (API Mock Robusta) ─────
 //
 // Centraliza toda la comunicación con la API (/v1/).
-// Soporta sincronización en memoria + persistencia web (localStorage),
-// idempotencia por solicitud, detección de duplicados y descuento atómico
-// de stock cuando se crea un pedido con variantes SKU.
+// Mantiene índice O(1) en memoria (`pedidosCache`), persistencia en
+// `localStorage` (Web) o `AsyncStorage` (iOS/Android), sync multi-pestaña,
+// idempotencia acotada y descuento atómico de stock por SKU.
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { CONFIG } from "../constants/config";
 import {
   CrearPedidoOpciones,
   EstadoPedido,
@@ -12,7 +15,6 @@ import {
   ItemPedido,
   Pedido,
 } from "../types/pedido";
-import { CONFIG } from "../constants/config";
 import {
   calcularTotalesChile,
   registrarPedidoEnCliente,
@@ -21,19 +23,71 @@ import {
 
 const STORAGE_KEY = "deliverytracker_pedidos_v3";
 const VENTANA_DUPLICADO_MS = 3 * 60 * 1000;
-
-// Garantizar inicio limpio en blanco al arrancar
-if (typeof window !== "undefined" && window.localStorage) {
-  try {
-    window.localStorage.removeItem("deliverytracker_pedidos_v1");
-    window.localStorage.removeItem("deliverytracker_pedidos_v2");
-    window.localStorage.removeItem("deliverytracker_pedidos_v3");
-  } catch { }
-}
+const MAX_IDEMPOTENCY_KEYS = 200;
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
 const idempotencyProcesadas = new Set<string>();
+
+let pedidosCache: Record<string, Pedido> = {};
+let almacenListo = false;
+let promesaHidratacion: Promise<void> | null = null;
+
+function tieneLocalStorageWeb(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.localStorage !== "undefined" &&
+    window.localStorage !== null
+  );
+}
+
+function usarAsyncStorageNativo(): boolean {
+  const esNode =
+    typeof process !== "undefined" && Boolean(process.versions?.node);
+  return !tieneLocalStorageWeb() && !esNode;
+}
+
+function leerLocalStorageWeb(): Record<string, Pedido> | null {
+  if (!tieneLocalStorageWeb()) return null;
+  try {
+    const data = window.localStorage.getItem(STORAGE_KEY);
+    return data ? (JSON.parse(data) as Record<string, Pedido>) : {};
+  } catch (e) {
+    console.warn("No se pudo leer de localStorage:", e);
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch { }
+    return {};
+  }
+}
+
+async function asegurarAlmacenListo(): Promise<void> {
+  if (almacenListo) return;
+  if (tieneLocalStorageWeb()) {
+    pedidosCache = leerLocalStorageWeb() ?? {};
+    almacenListo = true;
+    return;
+  }
+  if (!usarAsyncStorageNativo()) {
+    almacenListo = true;
+    return;
+  }
+  if (!promesaHidratacion) {
+    promesaHidratacion = (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          pedidosCache = JSON.parse(raw) as Record<string, Pedido>;
+        }
+      } catch (e) {
+        console.warn("No se pudo leer pedidos desde AsyncStorage:", e);
+      } finally {
+        almacenListo = true;
+      }
+    })();
+  }
+  await promesaHidratacion;
+}
 
 function notificarCambio() {
   listeners.forEach((listener) => {
@@ -43,16 +97,6 @@ function notificarCambio() {
       console.warn("Error en listener de pedidos:", e);
     }
   });
-
-  if (
-    typeof window !== "undefined" &&
-    typeof window.dispatchEvent === "function" &&
-    typeof CustomEvent !== "undefined"
-  ) {
-    try {
-      window.dispatchEvent(new CustomEvent("pedidos_actualizados"));
-    } catch { }
-  }
 }
 
 export function suscribirACambios(listener: Listener): () => void {
@@ -62,61 +106,49 @@ export function suscribirACambios(listener: Listener): () => void {
   };
 }
 
-let pedidosCache: Record<string, Pedido> = {};
-
-function cargarDesdeStorage(): Record<string, Pedido> {
-  if (typeof window !== "undefined" && window.localStorage) {
-    try {
-      const data = window.localStorage.getItem(STORAGE_KEY);
-      if (data) {
-        return JSON.parse(data);
-      }
-    } catch (e) {
-      console.warn("No se pudo leer de localStorage:", e);
-      try {
-        window.localStorage.removeItem(STORAGE_KEY);
-      } catch { }
-    }
-  }
-  return pedidosCache;
-}
-
-function guardarEnStorage(nuevos: Record<string, Pedido>) {
+function persistirAlmacen(nuevos: Record<string, Pedido>) {
   pedidosCache = nuevos;
-  if (typeof window !== "undefined" && window.localStorage) {
+  almacenListo = true;
+
+  if (tieneLocalStorageWeb()) {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos));
     } catch (e) {
       console.warn("No se pudo guardar en localStorage:", e);
     }
+  } else if (usarAsyncStorageNativo()) {
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nuevos)).catch((e) => {
+      console.warn("No se pudo guardar pedidos en AsyncStorage:", e);
+    });
   }
+
   notificarCambio();
 }
 
-function inicializarAlmacen() {
-  pedidosCache = cargarDesdeStorage();
+// Hidratación síncrona inmediata en Web + escucha multi-pestaña
+if (tieneLocalStorageWeb()) {
+  pedidosCache = leerLocalStorageWeb() ?? {};
+  almacenListo = true;
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("storage", (e) => {
+      if (e.key === STORAGE_KEY) {
+        pedidosCache = leerLocalStorageWeb() ?? {};
+        notificarCambio();
+      }
+    });
+  }
 }
 
-inicializarAlmacen();
-
-if (
-  typeof window !== "undefined" &&
-  typeof window.addEventListener === "function"
-) {
-  window.addEventListener("storage", (e) => {
-    if (e.key === STORAGE_KEY) {
-      pedidosCache = cargarDesdeStorage();
-      notificarCambio();
-    }
-  });
-  window.addEventListener("pedidos_actualizados", () => {
-    pedidosCache = cargarDesdeStorage();
-  });
+function registrarIdempotencyKey(key: string) {
+  if (idempotencyProcesadas.size >= MAX_IDEMPOTENCY_KEYS) {
+    const oldest = idempotencyProcesadas.values().next().value;
+    if (oldest) idempotencyProcesadas.delete(oldest);
+  }
+  idempotencyProcesadas.add(key);
 }
 
 function generarCodigo(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const actuales = cargarDesdeStorage();
   let reintentos = 0;
 
   while (reintentos < 10) {
@@ -124,7 +156,7 @@ function generarCodigo(): string {
     for (let i = 0; i < 4; i++) {
       codigo += chars[Math.floor(Math.random() * chars.length)];
     }
-    if (!actuales[codigo]) {
+    if (!pedidosCache[codigo]) {
       return codigo;
     }
     reintentos++;
@@ -175,18 +207,18 @@ function respuesta<T>(
 
 /** GET /v1/pedidos */
 export async function obtenerPedidos(): Promise<ApiResponse<Pedido[]>> {
+  await asegurarAlmacenListo();
   await simularLatencia();
-  const datos = cargarDesdeStorage();
-  return respuesta(200, Object.values(datos));
+  return respuesta(200, Object.values(pedidosCache));
 }
 
 /** GET /v1/pedidos/:codigo */
 export async function obtenerPedidoPorCodigo(
   codigo: string
 ): Promise<ApiResponse<Pedido | null>> {
+  await asegurarAlmacenListo();
   await simularLatencia();
-  const datos = cargarDesdeStorage();
-  const pedido = datos[codigo.trim().toUpperCase()];
+  const pedido = pedidosCache[codigo.trim().toUpperCase()];
 
   if (!pedido) {
     return respuesta(404, null);
@@ -203,10 +235,9 @@ export function detectarDuplicadoReciente(
 ): Pedido | null {
   const ahoraMs = Date.now();
   const nombreNorm = clienteNombre.trim().toLowerCase();
-  const pedidos = Object.values(cargarDesdeStorage());
 
   return (
-    pedidos.find((p) => {
+    Object.values(pedidosCache).find((p) => {
       const edadMs = ahoraMs - new Date(p.creadoEn).getTime();
       if (edadMs > VENTANA_DUPLICADO_MS) return false;
       const mismoCliente = clienteId
@@ -226,6 +257,7 @@ export async function crearPedido(
   metodoEnvio: string = "Courier Express 24h",
   opciones?: CrearPedidoOpciones
 ): Promise<ApiResponse<Pedido>> {
+  await asegurarAlmacenListo();
   await simularLatencia();
 
   if (!clienteNombre.trim() || items.length === 0) {
@@ -234,7 +266,10 @@ export async function crearPedido(
     });
   }
 
-  if (opciones?.idempotencyKey && idempotencyProcesadas.has(opciones.idempotencyKey)) {
+  if (
+    opciones?.idempotencyKey &&
+    idempotencyProcesadas.has(opciones.idempotencyKey)
+  ) {
     return respuesta(409, null as unknown as Pedido, {
       errorCode: "IDEMPOTENCY_DUPLICATE",
     });
@@ -251,12 +286,12 @@ export async function crearPedido(
   }
 
   if (opciones?.idempotencyKey) {
-    idempotencyProcesadas.add(opciones.idempotencyKey);
+    registrarIdempotencyKey(opciones.idempotencyKey);
   }
 
   const ahora = new Date().toISOString();
   const subtotalItems = items.reduce(
-    (acc, it) => acc + (it.precioUnitario ?? 19990) * it.cantidad,
+    (acc, it) => acc + (it.precioUnitario ?? 0) * it.cantidad,
     0
   );
 
@@ -296,9 +331,7 @@ export async function crearPedido(
     idempotencyKey: opciones?.idempotencyKey,
   };
 
-  const actuales = cargarDesdeStorage();
-  const actualizados = { ...actuales, [nuevo.codigo]: nuevo };
-  guardarEnStorage(actualizados);
+  persistirAlmacen({ ...pedidosCache, [nuevo.codigo]: nuevo });
   registrarPedidoEnCliente(opciones?.clienteId, nuevo.codigo);
 
   return respuesta(201, nuevo);
@@ -308,11 +341,11 @@ export async function crearPedido(
 export async function avanzarEstado(
   codigo: string
 ): Promise<ApiResponse<Pedido | null>> {
+  await asegurarAlmacenListo();
   await simularLatencia();
 
   const codigoNormalizado = codigo.trim().toUpperCase();
-  const actuales = cargarDesdeStorage();
-  const pedido = actuales[codigoNormalizado];
+  const pedido = pedidosCache[codigoNormalizado];
 
   if (!pedido) {
     return respuesta(404, null);
@@ -330,21 +363,27 @@ export async function avanzarEstado(
     actualizadoEn: new Date().toISOString(),
   };
 
-  const actualizados = { ...actuales, [codigoNormalizado]: actualizado };
-  guardarEnStorage(actualizados);
+  persistirAlmacen({ ...pedidosCache, [codigoNormalizado]: actualizado });
 
   return respuesta(200, actualizado);
 }
 
-/** Vaciar todas las órdenes y resetear el almacén en blanco */
+/** Vaciar todas las órdenes y limpiar almacenamiento persistido */
 export async function vaciarPedidos(): Promise<ApiResponse<Pedido[]>> {
-  if (typeof window !== "undefined" && window.localStorage) {
-    window.localStorage.removeItem(STORAGE_KEY);
-  }
   pedidosCache = {};
+  almacenListo = true;
   idempotencyProcesadas.clear();
-  guardarEnStorage({});
+
+  if (tieneLocalStorageWeb()) {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch { }
+  } else if (usarAsyncStorageNativo()) {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+    } catch { }
+  }
+
+  notificarCambio();
   return respuesta(200, []);
 }
-
-export const resetearSemilla = vaciarPedidos;

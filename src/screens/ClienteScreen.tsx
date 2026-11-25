@@ -17,7 +17,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import { AvisoFlotante, TonoAviso } from "../components/AvisoFlotante";
 import { Boton } from "../components/Boton";
@@ -30,6 +30,7 @@ import { ProductoCatalogoCard } from "../components/ProductoCatalogoCard";
 import { StepperProgreso } from "../components/StepperProgreso";
 import { TarjetaMetrica } from "../components/TarjetaMetrica";
 import { usePedidos } from "../context/PedidosContext";
+import { esEstadoTerminal } from "../hooks/pollingConfig";
 import { usePedidoPolling } from "../hooks/usePedidoPolling";
 import { useReducirMovimiento } from "../hooks/useReducirMovimiento";
 import { COMUNAS_RM } from "../services/operacionesMock";
@@ -59,7 +60,12 @@ type FiltroCliente = "todos" | EstadoPedido;
 
 const DURACION_AVISO_MS = 7_000;
 const CLAVE_NOMBRE_CLIENTE = "@deliverytracker/cliente_nombre";
+const CLAVE_CODIGOS_CLIENTE = "@deliverytracker/cliente_codigos";
 const NOMBRE_CLIENTE_DEFAULT = "Martina Soto";
+
+function generarIdempotencyCliente(): string {
+  return `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
 
 interface AvisoEstado {
   titulo: string;
@@ -98,24 +104,24 @@ export function ClienteScreen() {
   const [campoEnfocado, setCampoEnfocado] = useState(false);
 
   const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
-  const estadoAnteriorRef = useRef<EstadoPedido | null>(null);
+  const estadoAnteriorRef = useRef<{
+    codigo: string;
+    estado: EstadoPedido;
+  } | null>(null);
+  const consultaSeqRef = useRef(0);
+  const ultimoParamRef = useRef("");
 
-  // Sincronización con query param ?codigo=XXXX sin setState en useEffect
-  const [ultimoParamAplicado, setUltimoParamAplicado] = useState("");
-  const paramLimpio =
-    typeof codigoParam === "string" ? codigoParam.trim().toUpperCase() : "";
+  const [enFoco, setEnFoco] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setEnFoco(true);
+      return () => setEnFoco(false);
+    }, [])
+  );
 
-  if (paramLimpio.length === 4 && paramLimpio !== ultimoParamAplicado) {
-    setUltimoParamAplicado(paramLimpio);
-    setVista("seguimiento");
-    setCodigoInput(paramLimpio);
-    setErrorCodigo(null);
-    setEstadoPedido({ tipo: "cargando" });
-    setCodigoBuscado(paramLimpio);
-  }
-
-  // ─── Perfil de Cliente (nombre editable + persistente) ────────
+  // ─── Perfil de Cliente + Códigos propios (privacidad por cliente) ──
   const [nombreCliente, setNombreCliente] = useState(NOMBRE_CLIENTE_DEFAULT);
+  const [codigosCliente, setCodigosCliente] = useState<string[]>([]);
   const [modalNombreAbierto, setModalNombreAbierto] = useState(false);
   const [nombreEditInput, setNombreEditInput] = useState("");
   const [errorNombreEdit, setErrorNombreEdit] = useState<string | null>(null);
@@ -124,25 +130,73 @@ export function ClienteScreen() {
   const [carrito, setCarrito] = useState<ItemPedido[]>([]);
   const [modalCompraAbierto, setModalCompraAbierto] = useState(false);
   const [nombreCompra, setNombreCompra] = useState(NOMBRE_CLIENTE_DEFAULT);
+  const [errorNombreCompra, setErrorNombreCompra] = useState<string | null>(null);
   const [dirCompra, setDirCompra] = useState("Av. Providencia 1450, Dpto 802");
   const [comunaCompra, setComunaCompra] = useState<string>(COMUNAS_RM[0]);
+  const [idempotencyCompra, setIdempotencyCompra] = useState(() =>
+    generarIdempotencyCliente()
+  );
   const [creandoCompra, setCreandoCompra] = useState(false);
+
+  const registrarCodigoPropio = useCallback((codigo: string) => {
+    const norm = codigo.trim().toUpperCase();
+    if (!norm) return;
+    setCodigosCliente((prev) => {
+      if (prev.includes(norm)) return prev;
+      const siguiente = [norm, ...prev];
+      AsyncStorage.setItem(CLAVE_CODIGOS_CLIENTE, JSON.stringify(siguiente)).catch(
+        () => { }
+      );
+      return siguiente;
+    });
+  }, []);
 
   useEffect(() => {
     let activo = true;
-    AsyncStorage.getItem(CLAVE_NOMBRE_CLIENTE)
-      .then((guardado) => {
-        if (activo && guardado && guardado.trim().length >= 2) {
-          const limpio = guardado.trim();
+    Promise.all([
+      AsyncStorage.getItem(CLAVE_NOMBRE_CLIENTE),
+      AsyncStorage.getItem(CLAVE_CODIGOS_CLIENTE),
+    ])
+      .then(([guardadoNombre, guardadoCodigos]) => {
+        if (!activo) return;
+        if (guardadoNombre && guardadoNombre.trim().length >= 2) {
+          const limpio = guardadoNombre.trim();
           setNombreCliente(limpio);
           setNombreCompra(limpio);
         }
+        if (guardadoCodigos) {
+          try {
+            const lista = JSON.parse(guardadoCodigos);
+            if (Array.isArray(lista)) {
+              setCodigosCliente(
+                lista.filter((c): c is string => typeof c === "string")
+              );
+            }
+          } catch { }
+        }
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       activo = false;
     };
   }, []);
+
+  // Sincronización con query param ?codigo=XXXX mediante efecto (sin setState en render)
+  useEffect(() => {
+    const paramLimpio =
+      typeof codigoParam === "string" ? codigoParam.trim().toUpperCase() : "";
+    if (paramLimpio.length === 4 && paramLimpio !== ultimoParamRef.current) {
+      ultimoParamRef.current = paramLimpio;
+      setVista("seguimiento");
+      setCodigoInput(paramLimpio);
+      setErrorCodigo(null);
+      setEstadoPedido({ tipo: "cargando" });
+      setCodigoBuscado(paramLimpio);
+      router.setParams({ codigo: undefined });
+    } else if (!paramLimpio) {
+      ultimoParamRef.current = "";
+    }
+  }, [codigoParam]);
 
   const abrirModalNombre = useCallback(() => {
     setNombreEditInput(nombreCliente);
@@ -160,7 +214,7 @@ export function ClienteScreen() {
     setNombreCompra(limpio);
     setModalNombreAbierto(false);
     setErrorNombreEdit(null);
-    AsyncStorage.setItem(CLAVE_NOMBRE_CLIENTE, limpio).catch(() => {});
+    AsyncStorage.setItem(CLAVE_NOMBRE_CLIENTE, limpio).catch(() => { });
     setAviso({
       titulo: "Nombre actualizado",
       mensaje: `Ahora te mostramos como ${limpio}.`,
@@ -185,13 +239,17 @@ export function ClienteScreen() {
 
   const consultarPedido = useCallback(async () => {
     if (!codigoBuscado) return;
+    const seq = ++consultaSeqRef.current;
 
     try {
       const res = await obtenerPedidoPorCodigo(codigoBuscado);
+      if (seq !== consultaSeqRef.current) return;
 
       if (res.status === 404) {
         setEstadoPedido({ tipo: "vacio" });
-        estadoAnteriorRef.current = null;
+        if (estadoAnteriorRef.current?.codigo === codigoBuscado) {
+          estadoAnteriorRef.current = null;
+        }
         return;
       }
 
@@ -204,10 +262,13 @@ export function ClienteScreen() {
       }
 
       const pedidoActualizado = res.data;
+      registrarCodigoPropio(pedidoActualizado.codigo);
 
+      const previo = estadoAnteriorRef.current;
       if (
-        estadoAnteriorRef.current !== null &&
-        estadoAnteriorRef.current !== pedidoActualizado.estado
+        previo !== null &&
+        previo.codigo === pedidoActualizado.codigo &&
+        previo.estado !== pedidoActualizado.estado
       ) {
         setAviso({
           titulo: "Tu pedido cambió de estado",
@@ -215,7 +276,10 @@ export function ClienteScreen() {
           tono: "acento",
         });
       }
-      estadoAnteriorRef.current = pedidoActualizado.estado;
+      estadoAnteriorRef.current = {
+        codigo: pedidoActualizado.codigo,
+        estado: pedidoActualizado.estado,
+      };
       setUltimaActualizacion(
         new Date().toLocaleTimeString("es-CL", {
           hour: "2-digit",
@@ -225,64 +289,29 @@ export function ClienteScreen() {
 
       setEstadoPedido({ tipo: "datos", datos: pedidoActualizado });
     } catch {
+      if (seq !== consultaSeqRef.current) return;
       setEstadoPedido({
         tipo: "error",
         mensaje: "Error de conexión al consultar el estado del despacho.",
       });
     }
-  }, [codigoBuscado]);
+  }, [codigoBuscado, registrarCodigoPropio]);
+
+  const pedidoEnPantalla =
+    estadoPedido?.tipo === "datos" ? estadoPedido.datos : null;
+  const esPedidoTerminal =
+    pedidoEnPantalla !== null &&
+    pedidoEnPantalla.codigo === codigoBuscado &&
+    esEstadoTerminal(pedidoEnPantalla.estado);
 
   const pollingStatus = usePedidoPolling({
     fetchFn: consultarPedido,
-    enabled: codigoBuscado !== null,
+    enabled: enFoco && codigoBuscado !== null && !esPedidoTerminal,
+    resetKey: codigoBuscado,
     intervaloInicial: 5_000,
     intervaloLargo: 30_000,
     umbralCambio: 30_000,
   });
-
-  useEffect(() => {
-    if (!codigoBuscado) return;
-    let cancelado = false;
-    estadoAnteriorRef.current = null;
-    (async () => {
-      try {
-        const res = await obtenerPedidoPorCodigo(codigoBuscado);
-        if (cancelado) return;
-        if (res.status === 404) {
-          setEstadoPedido({ tipo: "vacio" });
-          estadoAnteriorRef.current = null;
-          return;
-        }
-        if (!res.ok || !res.data) {
-          setEstadoPedido({
-            tipo: "error",
-            mensaje: `El servidor respondió con un error (${res.status}).`,
-          });
-          return;
-        }
-        estadoAnteriorRef.current = res.data.estado;
-        setEstadoPedido({ tipo: "datos", datos: res.data });
-        setUltimaActualizacion(
-          new Date().toLocaleTimeString("es-CL", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })
-        );
-      } catch {
-        if (!cancelado) {
-          setEstadoPedido({
-            tipo: "error",
-            mensaje: "Error de conexión al consultar el estado del despacho.",
-          });
-        }
-      }
-    })();
-
-    return () => {
-      cancelado = true;
-    };
-  }, [codigoBuscado]);
 
   useEffect(() => {
     if (!aviso) return;
@@ -343,13 +372,19 @@ export function ClienteScreen() {
           },
         ];
       });
+      setErrorNombreCompra(null);
       setModalCompraAbierto(true);
     },
     []
   );
 
   const confirmarPedidoCliente = async () => {
-    if (creandoCompra || carrito.length === 0 || !nombreCompra.trim()) return;
+    if (creandoCompra || carrito.length === 0) return;
+    if (nombreCompra.trim().length < 2) {
+      setErrorNombreCompra("Ingresa tu nombre completo para recibir el pedido.");
+      return;
+    }
+    setErrorNombreCompra(null);
     setCreandoCompra(true);
     try {
       const res = await crearOrden(
@@ -358,7 +393,7 @@ export function ClienteScreen() {
         comunaCompra.trim() || "Providencia",
         carrito,
         "Courier Express 24h",
-        { creadoPorAdmin: true }
+        { idempotencyKey: idempotencyCompra }
       );
       if (!res.ok || !res.codigo) {
         setAviso({
@@ -368,7 +403,9 @@ export function ClienteScreen() {
         });
         return;
       }
+      registrarCodigoPropio(res.codigo);
       setCarrito([]);
+      setIdempotencyCompra(generarIdempotencyCliente());
       setModalCompraAbierto(false);
       setAviso({
         titulo: `Pedido #${res.codigo} confirmado`,
@@ -380,6 +417,22 @@ export function ClienteScreen() {
       setCreandoCompra(false);
     }
   };
+
+  // Pedidos propios del cliente (aislados del resto de compradores)
+  const codigosClienteSet = useMemo(
+    () => new Set(codigosCliente),
+    [codigosCliente]
+  );
+
+  const misPedidos = useMemo(
+    () => pedidos.filter((p) => codigosClienteSet.has(p.codigo)),
+    [pedidos, codigosClienteSet]
+  );
+
+  const misPedidosActivosCount = useMemo(
+    () => misPedidos.filter((p) => p.estado !== "entregado").length,
+    [misPedidos]
+  );
 
   // Filtrados derivados
   const catalogoFiltrado = useMemo(() => {
@@ -394,7 +447,7 @@ export function ClienteScreen() {
 
   const pedidosFiltrados = useMemo(() => {
     const q = busquedaGlobal.trim().toLowerCase();
-    return pedidos.filter((p) => {
+    return misPedidos.filter((p) => {
       if (filtroHistorial !== "todos" && p.estado !== filtroHistorial)
         return false;
       if (!q) return true;
@@ -404,7 +457,7 @@ export function ClienteScreen() {
         p.items.some((i) => i.nombre.toLowerCase().includes(q))
       );
     });
-  }, [pedidos, filtroHistorial, busquedaGlobal]);
+  }, [misPedidos, filtroHistorial, busquedaGlobal]);
 
   const totalCarrito = useMemo(
     () =>
@@ -421,14 +474,14 @@ export function ClienteScreen() {
       id: "mis-pedidos",
       etiqueta: "Mis pedidos",
       icono: "shopping-bag",
-      badge: pedidos.length,
+      badge: misPedidos.length,
     },
     { id: "seguimiento", etiqueta: "Seguimiento", icono: "map" },
   ];
 
   const pedidoActivoDestacado =
     (estadoPedido?.tipo === "datos" ? estadoPedido.datos : null) ??
-    pedidos[0] ??
+    misPedidos[0] ??
     null;
 
   // ─── Subvista 1: RESUMEN CLIENTE (Imagen 2) ────────────────────
@@ -537,14 +590,14 @@ export function ClienteScreen() {
       <View style={styles.metricasGrid}>
         <TarjetaMetrica
           etiqueta="En tránsito"
-          valor={String(analitica.activos).padStart(2, "0")}
+          valor={String(misPedidosActivosCount).padStart(2, "0")}
           subtitulo="Órdenes activas"
           icono="truck"
           tono="acento"
         />
         <TarjetaMetrica
           etiqueta="Pedidos totales"
-          valor={String(analitica.total).padStart(2, "0")}
+          valor={String(misPedidos.length).padStart(2, "0")}
           subtitulo="En tu cuenta"
           icono="package"
           tono="neutro"
@@ -670,7 +723,7 @@ export function ClienteScreen() {
             </Pressable>
           </View>
 
-          {pedidos.length === 0 ? (
+          {misPedidos.length === 0 ? (
             <View
               style={[
                 styles.emptyBox,
@@ -688,7 +741,7 @@ export function ClienteScreen() {
             </View>
           ) : (
             <View style={styles.miniLista}>
-              {pedidos.slice(0, 3).map((p) => (
+              {misPedidos.slice(0, 3).map((p) => (
                 <Pressable
                   key={p.codigo}
                   onPress={() => seleccionarPedidoParaSeguir(p.codigo)}
@@ -827,7 +880,7 @@ export function ClienteScreen() {
         >
           {(
             [
-              { id: "todos", label: `Todos · ${pedidos.length}` },
+              { id: "todos", label: `Todos · ${misPedidos.length}` },
               ...FLUJO_ESTADOS.map((est) => ({
                 id: est,
                 label: ETIQUETAS_ESTADO[est],
@@ -1149,10 +1202,10 @@ export function ClienteScreen() {
                 inputRef.current?.focus();
               },
             }
-            : pedidos[0]
+            : misPedidos[0]
               ? {
-                etiqueta: `Seguir #${pedidos[0].codigo}`,
-                onPress: () => seleccionarPedidoParaSeguir(pedidos[0].codigo),
+                etiqueta: `Seguir #${misPedidos[0].codigo}`,
+                onPress: () => seleccionarPedidoParaSeguir(misPedidos[0].codigo),
               }
               : undefined
         }
@@ -1280,12 +1333,22 @@ export function ClienteScreen() {
                 <View
                   style={[
                     styles.pulso,
-                    { backgroundColor: colores.puntoEstado.entregado },
+                    {
+                      backgroundColor: esEstadoTerminal(pedido.estado)
+                        ? colores.estado.entregado
+                        : pollingStatus.enSegundoPlano
+                          ? colores.tintaTerciaria
+                          : colores.puntoEstado.entregado,
+                    },
                   ]}
                 />
                 <View style={styles.flex}>
                   <Text style={[tipografia.etiqueta, { color: colores.tinta }]}>
-                    Monitoreo activo
+                    {esEstadoTerminal(pedido.estado)
+                      ? "Pedido entregado"
+                      : pollingStatus.enSegundoPlano
+                        ? "Monitoreo en pausa"
+                        : "Monitoreo activo"}
                   </Text>
                   <Text
                     style={[
@@ -1293,9 +1356,9 @@ export function ClienteScreen() {
                       { color: colores.tintaSecundaria },
                     ]}
                   >
-                    Cada {pollingStatus.frecuenciaSegundos}s
-                    {pollingStatus.esFrecuenciaLenta ? " · ahorro" : " · en vivo"}
-                    {ultimaActualizacion ? ` · ${ultimaActualizacion}` : ""}
+                    {esEstadoTerminal(pedido.estado)
+                      ? "Entrega completada · polling detenido"
+                      : `Cada ${pollingStatus.frecuenciaSegundos}s${pollingStatus.esFrecuenciaLenta ? " · ahorro" : " · en vivo"}${ultimaActualizacion ? ` · ${ultimaActualizacion}` : ""}`}
                   </Text>
                 </View>
                 <Pressable
@@ -1631,8 +1694,12 @@ export function ClienteScreen() {
             <CampoTexto
               etiqueta="Tu nombre"
               valor={nombreCompra}
-              onCambio={setNombreCompra}
+              onCambio={(txt) => {
+                setNombreCompra(txt);
+                if (errorNombreCompra) setErrorNombreCompra(null);
+              }}
               icono="user"
+              error={errorNombreCompra}
             />
             <CampoTexto
               etiqueta="Dirección de entrega"

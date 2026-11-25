@@ -37,10 +37,10 @@ export const TRANSPORTISTAS: {
   etiqueta: string;
   detalle: string;
 }[] = [
-  { id: "Bluex", etiqueta: "Bluex", detalle: "Express RM 24h" },
-  { id: "Starken", etiqueta: "Starken", detalle: "Domicilio estándar" },
-  { id: "Chilexpress", etiqueta: "Chilexpress", detalle: "Prioritario" },
-];
+    { id: "Bluex", etiqueta: "Bluex", detalle: "Express RM 24h" },
+    { id: "Starken", etiqueta: "Starken", detalle: "Domicilio estándar" },
+    { id: "Chilexpress", etiqueta: "Chilexpress", detalle: "Prioritario" },
+  ];
 
 export const VENTANAS_HORARIAS = [
   "09:00 – 13:00 (AM)",
@@ -350,11 +350,11 @@ export function registrarPedidoEnCliente(
   clientesDirectorio = clientesDirectorio.map((c) =>
     c.id === clienteId
       ? {
-          ...c,
-          totalPedidos: c.totalPedidos + 1,
-          ultimoPedidoCodigo: codigo,
-          ultimoPedidoFecha: "Recién creado",
-        }
+        ...c,
+        totalPedidos: c.totalPedidos + 1,
+        ultimoPedidoCodigo: codigo,
+        ultimoPedidoFecha: "Recién creado",
+      }
       : c
   );
 }

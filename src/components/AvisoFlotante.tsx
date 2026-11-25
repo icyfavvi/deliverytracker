@@ -5,7 +5,7 @@
 // su texto a los lectores de pantalla.
 
 import React, { useEffect, useMemo } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Icon, LucideIconName } from "./Icon";
 import { useReducirMovimiento } from "../hooks/useReducirMovimiento";
@@ -42,38 +42,29 @@ export function AvisoFlotante({
   const desplazamiento = useMemo(() => new Animated.Value(-24), []);
 
   useEffect(() => {
-    if (visible) {
-      if (reducirMovimiento) {
-        opacidad.setValue(1);
-        desplazamiento.setValue(0);
-        return;
-      }
-      Animated.parallel([
-        Animated.timing(opacidad, {
-          toValue: 1,
-          duration: TRANSICIONES.media,
-          useNativeDriver: true,
-        }),
-        Animated.timing(desplazamiento, {
-          toValue: 0,
-          duration: TRANSICIONES.media,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(opacidad, {
-          toValue: 0,
-          duration: TRANSICIONES.rapida,
-          useNativeDriver: true,
-        }),
-        Animated.timing(desplazamiento, {
-          toValue: -24,
-          duration: TRANSICIONES.rapida,
-          useNativeDriver: true,
-        }),
-      ]).start();
+    if (!visible) {
+      opacidad.setValue(0);
+      desplazamiento.setValue(-24);
+      return;
     }
+    if (reducirMovimiento) {
+      opacidad.setValue(1);
+      desplazamiento.setValue(0);
+      return;
+    }
+    const usarNativo = Platform.OS !== "web";
+    Animated.parallel([
+      Animated.timing(opacidad, {
+        toValue: 1,
+        duration: TRANSICIONES.media,
+        useNativeDriver: usarNativo,
+      }),
+      Animated.timing(desplazamiento, {
+        toValue: 0,
+        duration: TRANSICIONES.media,
+        useNativeDriver: usarNativo,
+      }),
+    ]).start();
   }, [visible, opacidad, desplazamiento, reducirMovimiento]);
 
   if (!visible) return null;

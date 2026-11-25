@@ -13,7 +13,5 @@ export const CONFIG = {
   env: process.env.EXPO_PUBLIC_APP_ENV ?? "development",
   apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "https://api.vogueatelier.local/v1",
   storeName: process.env.EXPO_PUBLIC_STORE_NAME ?? "Atelier Noir — Urban Apparel",
-  // Token simulado para desarrollo: en producción debe gestionarse en el backend
-  apiSecretToken: process.env.EXPO_PUBLIC_SECRET_TOKEN ?? "dev_secret_vault_token_simulated",
   isProduction: process.env.EXPO_PUBLIC_APP_ENV === "production",
 } as const;

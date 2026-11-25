@@ -180,10 +180,7 @@ export function CrearPedidoScreen() {
     return () => clearTimeout(t);
   }, [aviso]);
 
-  const clientesFiltrados = useMemo(
-    () => buscarClientes(busquedaCliente),
-    [busquedaCliente]
-  );
+  const clientesFiltrados = buscarClientes(busquedaCliente);
 
   const productosFiltrados = useMemo(() => {
     const q = busquedaProducto.trim().toLowerCase();
@@ -294,8 +291,25 @@ export function CrearPedidoScreen() {
 
   const varianteActivaDe = (prod: ProductoCatalogoAdmin) => {
     const tallaElegida = tallaPorProducto[prod.id];
+    const porTalla = prod.variantes.find((v) => v.talla === tallaElegida);
+    if (
+      porTalla &&
+      (!filtroStockCritico ||
+        (porTalla.stock > 0 && porTalla.stock <= STOCK_CRITICO_MAX))
+    ) {
+      return porTalla;
+    }
+    if (filtroStockCritico) {
+      return (
+        prod.variantes.find(
+          (v) => v.stock > 0 && v.stock <= STOCK_CRITICO_MAX
+        ) ??
+        porTalla ??
+        prod.variantes[0]
+      );
+    }
     return (
-      prod.variantes.find((v) => v.talla === tallaElegida) ??
+      porTalla ??
       prod.variantes.find((v) => v.stock > 0) ??
       prod.variantes[0]
     );
@@ -311,17 +325,23 @@ export function CrearPedidoScreen() {
     setMensajeStockLive(null);
     setErrores((prev) => ({ ...prev, productos: undefined }));
 
+    const actualActual =
+      lineasPedido.find((it) => it.sku === sku)?.cantidad ?? 0;
+    if (delta > 0 && actualActual + delta > stockDisponible) {
+      setMensajeStockLive(
+        stockDisponible === 0
+          ? `${prod.nombre} (Talla ${talla}) está agotado.`
+          : `Stock máximo alcanzado para ${prod.nombre} Talla ${talla} (${stockDisponible} un.).`
+      );
+      return;
+    }
+
     setLineasPedido((prev) => {
       const idx = prev.findIndex((it) => it.sku === sku);
       const actual = idx >= 0 ? prev[idx].cantidad : 0;
       const siguiente = actual + delta;
 
       if (delta > 0 && siguiente > stockDisponible) {
-        setMensajeStockLive(
-          stockDisponible === 0
-            ? `${prod.nombre} (Talla ${talla}) está agotado.`
-            : `Stock máximo alcanzado para ${prod.nombre} Talla ${talla} (${stockDisponible} un.).`
-        );
         return prev;
       }
 
@@ -923,7 +943,7 @@ export function CrearPedidoScreen() {
         </View>
 
         {desglose.subtotal > 0 &&
-        desglose.subtotal < ENVIO_GRATIS_DESDE_CLP ? (
+          desglose.subtotal < ENVIO_GRATIS_DESDE_CLP ? (
           <Text style={[tipografia.caption, { color: colores.acentoIntenso }]}>
             Faltan {formatearCLP(ENVIO_GRATIS_DESDE_CLP - desglose.subtotal)}{" "}
             para envío gratis.
@@ -1482,6 +1502,35 @@ export function CrearPedidoScreen() {
         ) : null}
 
         <View style={styles.productosLista}>
+          {productosFiltrados.length === 0 ? (
+            <View
+              style={[
+                styles.vacioCaja,
+                {
+                  backgroundColor: colores.superficieHundida,
+                  borderRadius: RADIOS.md,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  tipografia.caption,
+                  { color: colores.tintaSecundaria, textAlign: "center" },
+                ]}
+              >
+                No hay prendas que coincidan con los filtros actuales.
+              </Text>
+              <Boton
+                etiqueta="Limpiar filtros"
+                variante="secundario"
+                compacto
+                onPress={() => {
+                  setBusquedaProducto("");
+                  setFiltroStockCritico(false);
+                }}
+              />
+            </View>
+          ) : null}
           {productosFiltrados.map((prod) => {
             const variante = varianteActivaDe(prod);
             const lineaEnCarrito = lineasPedido.find(

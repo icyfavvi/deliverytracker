@@ -7,12 +7,25 @@ import {
   detectarDuplicadoReciente,
 } from "../src/services/pedidosApi";
 import {
+  buscarClientes,
   calcularAnaliticaOperacion,
   calcularTotalesChile,
+  crearClienteDirectorio,
   obtenerCatalogoConStock,
   obtenerStockPorSku,
   reponerStockSku,
 } from "../src/services/operacionesMock";
+import {
+  ADMIN_DEMO,
+  AuthStorageAdapter,
+  crearServicioAuth,
+  ErrorAuth,
+  MIN_CLAVE,
+} from "../src/services/authCore";
+import {
+  calcularIntervaloPolling,
+  esEstadoTerminal,
+} from "../src/hooks/pollingConfig";
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -21,6 +34,32 @@ function assert(condition: boolean, message: string) {
   }
   console.log(`✅ OK: ${message}`);
 }
+
+function crearMemoriaStorage(): AuthStorageAdapter {
+  const mapa = new Map<string, string>();
+  return {
+    getItem: async (k) => mapa.get(k) ?? null,
+    setItem: async (k, v) => {
+      mapa.set(k, v);
+    },
+    removeItem: async (k) => {
+      mapa.delete(k);
+    },
+  };
+}
+
+const cryptoNode = {
+  sha256Hex: async (input: string) => {
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(input)
+    );
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  },
+  randomUuid: () => globalThis.crypto.randomUUID(),
+};
 
 async function runTests() {
   console.log("=== PRUEBAS E-COMMERCE ROPA: ARQUITECTURA Y RÚBRICA UTEM ===\n");
@@ -32,17 +71,33 @@ async function runTests() {
   assert(resInicial.status === 200, "obtenerPedidos retorna status 200");
   assert(Array.isArray(resInicial.data), "data es un Array");
   assert(resInicial.data.length === 0, "Almacén inicia vacío sin órdenes de ejemplo");
-  console.log("   Órdenes iniciales: 0 (inicio limpio verificado)");
 
-  // 2. Consulta 404 discriminada
-  console.log("\n2. Verificando estado discriminado vacío (404 Not Found):");
+  // 2. Consulta 404 discriminada + validación 400
+  console.log("\n2. Verificando estados discriminados (404 Not Found y 400 Validation):");
   const resNoExiste = await obtenerPedidoPorCodigo("NOEX");
   assert(resNoExiste.status === 404, "Retorna 404 para código inexistente");
   assert(resNoExiste.ok === false, "res.ok es false para 404");
   assert(resNoExiste.data === null, "data es null para 404");
 
-  // 3. Crear pedido nuevo de prendas (201 Created)
-  console.log("\n3. Creación de orden de vestuario (201 Created):");
+  const resInvalido = await crearPedido("   ", "Dir 1", "Santiago", []);
+  assert(
+    resInvalido.status === 400 && resInvalido.errorCode === "VALIDATION",
+    "Retorna 400 VALIDATION para pedido vacío o sin cliente"
+  );
+
+  // 3. Crear pedido cliente sin precio admin ni envío oculto
+  console.log("\n3. Creación de orden cliente (201 Created, sin recargo admin oculto):");
+  const resSinPrecio = await crearPedido(
+    "Cliente Sin Precio",
+    "Av. Italia 100",
+    "Ñuñoa",
+    [{ nombre: "Prenda Sin Precio", cantidad: 2 }]
+  );
+  assert(
+    resSinPrecio.status === 201 && resSinPrecio.data.totalEstimado === 0,
+    "Item sin precioUnitario suma 0 consistentemente (sin fallback silencioso $19.990)"
+  );
+
   const resCrear = await crearPedido(
     "Mariana Valenzuela",
     "Av. Vitacura 3560, Depto 101",
@@ -57,10 +112,10 @@ async function runTests() {
   assert(resCrear.ok === true, "res.ok es true");
   assert(typeof resCrear.data.codigo === "string" && resCrear.data.codigo.length === 4, "Código generado de 4 caracteres");
   assert(resCrear.data.estado === "recibido", "Estado inicial es 'recibido'");
-  assert(resCrear.data.totalEstimado === 45990 + 2 * 19990, "Total calculado correctamente derivado de prendas");
+  assert(resCrear.data.totalEstimado === 45990 + 2 * 19990, "Total cliente coincide con prendas");
   const codigo = resCrear.data.codigo;
 
-  // 4. Consulta directa O(1) por código
+  // 4. Búsqueda directa O(1) por código
   console.log("\n4. Búsqueda directa O(1) por código de orden:");
   const resBuscar = await obtenerPedidoPorCodigo(codigo);
   assert(resBuscar.status === 200, "obtenerPedidoPorCodigo retorna 200");
@@ -68,13 +123,13 @@ async function runTests() {
   assert(resBuscar.data?.clienteNombre === "Mariana Valenzuela", "Nombre de clienta verificado");
   assert(resBuscar.data?.items.length === 2, "Items de vestuario presentes");
 
-  // 5. Transición completa de estados
-  console.log("\n5. Ciclo de despacho de moda (recibido -> preparando -> listo -> entregado):");
+  // 5. Ciclo completo de estados
+  console.log("\n5. Ciclo de despacho (recibido -> preparando -> listo -> entregado):");
   const p1 = await avanzarEstado(codigo);
-  assert(p1.status === 200 && p1.data?.estado === "preparando", "Avanzado a 'preparando' (Pick & Pack)");
+  assert(p1.status === 200 && p1.data?.estado === "preparando", "Avanzado a 'preparando'");
 
   const p2 = await avanzarEstado(codigo);
-  assert(p2.status === 200 && p2.data?.estado === "listo", "Avanzado a 'listo' (En ruta con courier)");
+  assert(p2.status === 200 && p2.data?.estado === "listo", "Avanzado a 'listo'");
 
   const p3 = await avanzarEstado(codigo);
   assert(p3.status === 200 && p3.data?.estado === "entregado", "Avanzado a 'entregado'");
@@ -82,17 +137,18 @@ async function runTests() {
   const p4 = await avanzarEstado(codigo);
   assert(p4.status === 409, "Retorna 409 Conflict al intentar avanzar orden ya entregada");
 
-  // 6. Reglas Admin, Stock O(1) y Analítica en 1 pasada
-  console.log("\n6. Verificando reglas Admin, Stock O(1), Idempotencia y Analítica:");
+  // 6. Reglas Admin, Stock O(1), Idempotencia acotada y Atomicidad multi-ítem
+  console.log("\n6. Reglas Admin, Stock O(1), Idempotencia y Atomicidad multi-ítem:");
   const totMenor = calcularTotalesChile(54990);
   assert(totMenor.envio === 4990, "Envío de $4.990 bajo $80.000 CLP");
   assert(totMenor.total === 54990 + 4990, "Total incluye envío bajo umbral");
-  assert(totMenor.ivaIncluido === Math.round(54990 - 54990 / 1.19), "IVA 19% incluido calculado correctamente");
+  assert(totMenor.ivaIncluido === Math.round(54990 - 54990 / 1.19), "IVA 19% incluido correcto");
 
   const totGratis = calcularTotalesChile(80000);
   assert(totGratis.envio === 0 && totGratis.total === 80000, "Envío gratis desde $80.000 CLP");
 
-  const stockAntes = obtenerStockPorSku("AN-HDY-M") ?? 0;
+  const stockAntesS = obtenerStockPorSku("AN-HDY-S") ?? 0;
+  const stockAntesM = obtenerStockPorSku("AN-HDY-M") ?? 0;
   const resAdmin = await crearPedido(
     "Martina Soto",
     "Av. Providencia 1450",
@@ -108,11 +164,11 @@ async function runTests() {
     }
   );
   assert(resAdmin.status === 201 && resAdmin.ok, "Pedido admin creado (201)");
-  assert((obtenerStockPorSku("AN-HDY-M") ?? -1) === stockAntes - 1, "Stock descontado atómicamente vía índice O(1)");
+  assert((obtenerStockPorSku("AN-HDY-M") ?? -1) === stockAntesM - 1, "Stock descontado atómicamente vía índice O(1)");
   assert(resAdmin.data.totalEstimado === 59980, "Total admin incluye envío ($54.990 + $4.990 = $59.980)");
 
   const stockRepuesto = reponerStockSku("AN-HDY-M", 1);
-  assert(stockRepuesto === stockAntes, "Reposición de stock en bodega funciona en O(1)");
+  assert(stockRepuesto === stockAntesM, "Reposición de stock en bodega funciona en O(1)");
 
   const resIdem = await crearPedido(
     "Martina Soto",
@@ -124,22 +180,167 @@ async function runTests() {
   );
   assert(resIdem.status === 409 && resIdem.errorCode === "IDEMPOTENCY_DUPLICATE", "Doble clic bloqueado por idempotencyKey");
 
-  const resSinStock = await crearPedido(
+  // Atomicidad en 2 ítems: si el 2do falla por stock, el 1ro NO se descuenta
+  const resParcial = await crearPedido(
     "Martina Soto",
     "Av. Providencia 1450",
     "Providencia",
-    [{ sku: "AN-HDY-M", nombre: "Noir Core Hoodie", talla: "M", cantidad: 99, precioUnitario: 54990 }],
+    [
+      { sku: "AN-HDY-S", nombre: "Noir Core Hoodie", talla: "S", cantidad: 1, precioUnitario: 54990 },
+      { sku: "AN-HDY-M", nombre: "Noir Core Hoodie", talla: "M", cantidad: 99, precioUnitario: 54990 },
+    ],
     "Bluex",
     { creadoPorAdmin: true, idempotencyKey: "key-test-2" }
   );
-  assert(resSinStock.status === 409 && resSinStock.errorCode === "INSUFFICIENT_STOCK", "Stock insuficiente rechazado con 409");
+  assert(
+    resParcial.status === 409 && resParcial.errorCode === "INSUFFICIENT_STOCK",
+    "Stock insuficiente en 2do ítem rechazado con 409"
+  );
+  assert(
+    obtenerStockPorSku("AN-HDY-S") === stockAntesS,
+    "Rollback atómico preserva el stock del 1er ítem sin descontar"
+  );
 
   const dup = detectarDuplicadoReciente("Martina Soto", 59980, "cli-01");
   assert(dup !== null && dup.codigo === resAdmin.data.codigo, "Detección de pedido duplicado reciente activa");
 
   const analitica = calcularAnaliticaOperacion([resAdmin.data], obtenerCatalogoConStock());
-  assert(analitica.total === 1 && analitica.ventasNetas === 59980, "Analítica en una sola pasada calcula totales reales");
+  assert(analitica.total === 1 && analitica.ventasNetas === 59980, "Analítica calcula totales reales");
   assert(analitica.porComuna[0]?.comuna === "Providencia", "Analítica por comuna RM agrupa correctamente");
+
+  // 7. CRM Clientes (búsqueda y alta en directorio)
+  console.log("\n7. Verificando CRM de clientes (buscar y crear):");
+  const encontrados = buscarClientes("8421");
+  assert(encontrados.length === 1 && encontrados[0].id === "cli-01", "Búsqueda por dígitos de teléfono encuentra cliente");
+  const cliNuevo = crearClienteDirectorio({
+    nombre: "Elena Navarro",
+    correo: "ELENA@TEST.CL",
+    telefono: "+56 9 4010 2030",
+  });
+  assert(cliNuevo.correo === "elena@test.cl" && cliNuevo.totalPedidos === 0, "Alta de cliente normaliza correo");
+  assert(buscarClientes("elena@test.cl").some((c) => c.id === cliNuevo.id), "Nuevo cliente aparece de inmediato en búsquedas");
+
+  // 8. Autenticación local (roles, validación de clave, demo solo dev)
+  console.log("\n8. Verificando autenticación, roles y reglas de contraseña:");
+  const authDev = crearServicioAuth(crearMemoriaStorage(), cryptoNode, {
+    permitirDemoAdmin: true,
+  });
+  const sesionAdminDev = await authDev.iniciarSesion(
+    ADMIN_DEMO.usuario,
+    ADMIN_DEMO.clave
+  );
+  assert(
+    sesionAdminDev.rol === "admin",
+    "Modo dev permite inicio con cuenta admin/admin"
+  );
+
+  // Regresión: almacenamiento con hash legado v1 (2000 rondas sin prefijo) debe permitir login
+  const storageLegado = crearMemoriaStorage();
+  const salLegado = "sal-legado-v1";
+  let hLegado = `${salLegado}:claveLegada1`;
+  for (let i = 0; i < 2000; i++) {
+    hLegado = await cryptoNode.sha256Hex(hLegado + salLegado);
+  }
+  await storageLegado.setItem(
+    "@deliverytracker/usuarios",
+    JSON.stringify([
+      {
+        usuario: ADMIN_DEMO.usuario,
+        rol: "admin",
+        sal: "sal-vieja-admin",
+        hash: "hash-legado-invalido-sin-prefijo",
+      },
+      {
+        usuario: "bodeguero",
+        rol: "operador",
+        sal: salLegado,
+        hash: hLegado,
+      },
+    ])
+  );
+  const authLegado = crearServicioAuth(storageLegado, cryptoNode, {
+    permitirDemoAdmin: true,
+  });
+  const sesionAdminMigrado = await authLegado.iniciarSesion(
+    ADMIN_DEMO.usuario,
+    ADMIN_DEMO.clave
+  );
+  const sesionBodegueroLegado = await authLegado.iniciarSesion(
+    "bodeguero",
+    "claveLegada1"
+  );
+  assert(
+    sesionAdminMigrado.rol === "admin" && sesionBodegueroLegado.rol === "operador",
+    "Compatibilidad con usuarios legados v1 y migración automática de admin/admin"
+  );
+
+  let errorClaveCorta = false;
+  try {
+    await authDev.registrar("nuevo_op", "1234567");
+  } catch (e) {
+    errorClaveCorta = e instanceof ErrorAuth;
+  }
+  assert(
+    errorClaveCorta,
+    `Registro rechaza claves menores a ${MIN_CLAVE} caracteres`
+  );
+
+  const sesionOpDev = await authDev.registrar("op_bodega", "claveSegura9");
+  assert(
+    sesionOpDev.rol === "operador",
+    "Cuentas registradas en modo dev obtienen rol 'operador'"
+  );
+
+  let errorDuplicado = false;
+  try {
+    await authDev.registrar("op_bodega", "otraClave99");
+  } catch (e) {
+    errorDuplicado = e instanceof ErrorAuth;
+  }
+  assert(errorDuplicado, "Registro rechaza nombres de usuario duplicados");
+
+  const sesionLeida = await authDev.leerSesion();
+  assert(sesionLeida?.usuario === "op_bodega", "leerSesion recupera sesión activa");
+  await authDev.cerrarSesion();
+  assert((await authDev.leerSesion()) === null, "cerrarSesion elimina sesión");
+
+  const authProd = crearServicioAuth(crearMemoriaStorage(), cryptoNode, {
+    permitirDemoAdmin: false,
+  });
+  let falloAdminProd = false;
+  try {
+    await authProd.iniciarSesion(ADMIN_DEMO.usuario, ADMIN_DEMO.clave);
+  } catch (e) {
+    falloAdminProd = e instanceof ErrorAuth;
+  }
+  assert(
+    falloAdminProd,
+    "Modo producción NO siembra cuenta débil admin/admin"
+  );
+
+  const primerAdminProd = await authProd.registrar("jefe.bodega", "ClaveFuerte2026");
+  const segundoOpProd = await authProd.registrar("asistente", "ClaveFuerte2026");
+  assert(
+    primerAdminProd.rol === "admin" && segundoOpProd.rol === "operador",
+    "Primer usuario en producción es admin y siguientes son operador"
+  );
+
+  // 9. Reglas de polling adaptativo
+  console.log("\n9. Verificando backoff de polling y detención en estado terminal:");
+  const faseRapida = calcularIntervaloPolling(5_000, 5_000, 30_000, 30_000);
+  const faseAhorro = calcularIntervaloPolling(30_000, 5_000, 30_000, 30_000);
+  assert(
+    faseRapida.intervaloMs === 5_000 && !faseRapida.esFrecuenciaLenta,
+    "Polling mantiene 5s antes del umbral de 30s"
+  );
+  assert(
+    faseAhorro.intervaloMs === 30_000 && faseAhorro.esFrecuenciaLenta,
+    "Polling cambia a 30s al alcanzar umbral de ahorro"
+  );
+  assert(
+    esEstadoTerminal("entregado") && !esEstadoTerminal("listo"),
+    "Estado 'entregado' detiene el polling como estado terminal"
+  );
 
   await vaciarPedidos();
   console.log("\n🎉 TODAS LAS PRUEBAS AUTOMATIZADAS PASARON SATISFACTORIAMENTE (100% OK).");

@@ -1,49 +1,53 @@
-// ─── Pantalla LOCAL / BODEGA: Despacho de E-commerce de Moda ─────────
+// ─── Portal ADMIN / BODEGA: Atelier Noir (Operaciones) ─────────────
 //
-// Rediseño visual Atelier Noir (ink + azul cobalto + tarjetas de métrica),
-// preservando toda la lógica de negocio, creación de órdenes, polling,
-// catálogo rápido, diseño responsivo y accesibilidad >= 44pt / WCAG AA.
+// Conecta `PortalShell` + `AdminSubvistas` (`Resumen`, `Bodega`,
+// `Despachos`, `Seguimiento`) + vista `Pedidos` con inventario real SKU
+// de `operacionesMock` y enlace directo a `/nuevo-pedido` (rol `admin`).
 
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  Text,
+  View,
   useWindowDimensions,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 
+import {
+  AdminBodegaView,
+  AdminDespachosView,
+  AdminResumenView,
+  AdminSeguimientoView,
+} from "../components/AdminSubvistas";
 import { AvisoFlotante, TonoAviso } from "../components/AvisoFlotante";
 import { Boton } from "../components/Boton";
-import { BotonSalir } from "../components/BotonSalir";
 import { CampoTexto } from "../components/CampoTexto";
 import { EstadoUIRenderer } from "../components/EstadoUIRenderer";
 import { Icon } from "../components/Icon";
-import { InterruptorTema } from "../components/InterruptorTema";
 import { Masthead } from "../components/Masthead";
 import { PedidoCard } from "../components/PedidoCard";
+import { PortalNavItem, PortalShell } from "../components/PortalShell";
 import { TarjetaMetrica } from "../components/TarjetaMetrica";
+import { useAuth } from "../context/AuthContext";
 import { usePedidos } from "../context/PedidosContext";
 import { usePedidoPolling } from "../hooks/usePedidoPolling";
+import { ADMIN_DEMO } from "../services/authLocal";
 import { vaciarPedidos } from "../services/pedidosApi";
 import { useTema } from "../theme/ThemeProvider";
 import { BREAKPOINTS, ESPACIOS, RADIOS, sombraTarjeta } from "../theme/tokens";
 import { ItemPedido, Pedido } from "../types/pedido";
 
-// Catálogo de prendas para creación rápida
-const PRENDAS_CATALOGO = [
-  { nombre: "Chaqueta Denim Vintage", talla: "M", color: "Azul Petróleo", precio: 45990 },
-  { nombre: "Polera Básica Algodón Pima", talla: "L", color: "Negro Lavado", precio: 19990 },
-  { nombre: "Pantalón Cargo Street", talla: "42", color: "Caqui", precio: 39990 },
-  { nombre: "Hoodie Heavyweight Fleece", talla: "XL", color: "Gris Plomo", precio: 42990 },
-  { nombre: "Vestido Midi Satinado", talla: "S", color: "Verde Salvia", precio: 34990 },
-];
+type VistaAdmin =
+  | "resumen"
+  | "bodega"
+  | "pedidos"
+  | "despachos"
+  | "seguimiento";
 
 const TALLA_PREDETERMINADA = "M";
 const PRECIO_MANUAL = 29990;
@@ -55,14 +59,58 @@ interface AvisoAccion {
   accion?: { etiqueta: string; icono?: "copy"; onPress: () => void };
 }
 
+interface PrendaRapidaSku {
+  id: string;
+  sku: string;
+  nombre: string;
+  talla: string;
+  color: string;
+  precio: number;
+  stock: number;
+}
+
 export function LocalScreen() {
   const { width } = useWindowDimensions();
   const esAncho = width >= BREAKPOINTS.tablet;
   const { colores, tipografia, modo, puntoMinimo } = useTema();
-  const { estado, estadisticas, recargar, crearOrden, avanzar, refrescando } =
-    usePedidos();
+  const { sesion } = useAuth();
+  const {
+    estado,
+    pedidos,
+    catalogo,
+    analitica,
+    estadisticas,
+    recargar,
+    crearOrden,
+    avanzar,
+    reponerStock,
+    refrescando,
+  } = usePedidos();
 
-  // ─── Estado del formulario de despacho ─────────────────────────
+  const esAdmin = sesion?.rol === "admin";
+  const nombreUsuario =
+    sesion?.usuario === ADMIN_DEMO.usuario
+      ? ADMIN_DEMO.nombreVisible
+      : (sesion?.usuario ?? "Operador Bodega");
+  const rolUsuario = esAdmin ? ADMIN_DEMO.cargo : "Operador / Despachos";
+  const inicialesUsuario =
+    nombreUsuario
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() ?? "")
+      .join("") || "OP";
+
+  const [vista, setVista] = useState<VistaAdmin>(
+    esAdmin ? "resumen" : "pedidos"
+  );
+  const vistaActiva: VistaAdmin =
+    !esAdmin && (vista === "resumen" || vista === "bodega")
+      ? "pedidos"
+      : vista;
+  const [busquedaGlobal, setBusquedaGlobal] = useState("");
+
+  // ─── Estado del formulario rápido de despacho ──────────────────
   const [nombre, setNombre] = useState("");
   const [direccion, setDireccion] = useState("");
   const [comuna, setComuna] = useState("");
@@ -79,56 +127,19 @@ export function LocalScreen() {
 
   const desplazarCatalogo = useCallback((direccionPaso: "izq" | "der") => {
     const paso = 220;
-    const delta = direccionPaso === "izq" ? -paso : paso;
-    const ref = scrollCatalogoRef.current as any;
-    if (!ref) return;
-
-    const domNode =
-      typeof ref.getScrollableNode === "function"
-        ? ref.getScrollableNode()
-        : ref._scrollNodeRef ??
-        (typeof ref.scrollBy === "function" || "scrollLeft" in ref ? ref : null);
-
-    if (domNode) {
-      if (typeof domNode.scrollBy === "function") {
-        domNode.scrollBy({
-          left: delta,
-          top: 0,
-          behavior: "smooth",
-        });
-        return;
-      }
-      if (typeof domNode.scrollLeft === "number") {
-        const destino = Math.max(0, domNode.scrollLeft + delta);
-        if (typeof domNode.scrollTo === "function") {
-          domNode.scrollTo({
-            left: destino,
-            top: 0,
-            behavior: "smooth",
-          });
-        } else {
-          domNode.scrollLeft = destino;
-        }
-        return;
-      }
-    }
-
     const nuevoX =
       direccionPaso === "izq"
         ? Math.max(0, scrollCatalogoX.current - paso)
         : scrollCatalogoX.current + paso;
     scrollCatalogoX.current = nuevoX;
-
-    if (typeof ref.scrollTo === "function") {
-      ref.scrollTo({
-        x: nuevoX,
-        y: 0,
-        animated: true,
-      });
-    }
+    scrollCatalogoRef.current?.scrollTo({
+      x: nuevoX,
+      y: 0,
+      animated: true,
+    });
   }, []);
 
-  // ─── Polling solo mientras la pestaña está a la vista ─────────
+  // ─── Polling solo mientras la pestaña está enfocada ────────────
   const [enFoco, setEnFoco] = useState(false);
   useFocusEffect(
     useCallback(() => {
@@ -140,6 +151,7 @@ export function LocalScreen() {
   usePedidoPolling({
     fetchFn: recargar,
     enabled: enFoco,
+    escucharEventos: false,
     intervaloInicial: 8_000,
     intervaloLargo: 25_000,
   });
@@ -150,7 +162,53 @@ export function LocalScreen() {
     return () => clearTimeout(temporizador);
   }, [aviso]);
 
-  // ─── Estado derivado: total estimado del paquete ──────────────
+  // ─── Catálogo conectado al stock real SKU ──────────────────────
+  const catalogoRapido = useMemo<PrendaRapidaSku[]>(
+    () =>
+      catalogo.map((prod) => {
+        const varActiva =
+          prod.variantes.find((v) => v.stock > 0) ?? prod.variantes[0];
+        return {
+          id: prod.id,
+          sku: varActiva.sku,
+          nombre: prod.nombre,
+          talla: varActiva.talla,
+          color: prod.color,
+          precio: prod.precio,
+          stock: varActiva.stock,
+        };
+      }),
+    [catalogo]
+  );
+
+  const stockPorSku = useMemo(() => {
+    const mapa: Record<string, number> = {};
+    for (const prod of catalogo) {
+      for (const v of prod.variantes) {
+        mapa[v.sku] = v.stock;
+      }
+    }
+    return mapa;
+  }, [catalogo]);
+
+  const pedidosFiltrados = useMemo(() => {
+    const q = busquedaGlobal.trim().toLowerCase();
+    if (!q) return pedidos;
+    return pedidos.filter(
+      (p) =>
+        p.codigo.toLowerCase().includes(q) ||
+        p.clienteNombre.toLowerCase().includes(q) ||
+        p.comuna.toLowerCase().includes(q) ||
+        p.items.some((i) => i.nombre.toLowerCase().includes(q))
+    );
+  }, [pedidos, busquedaGlobal]);
+
+  const estadoPedidosFiltrados = useMemo(() => {
+    if (estado.tipo !== "datos") return estado;
+    if (pedidosFiltrados.length === 0) return { tipo: "vacio" as const };
+    return { tipo: "datos" as const, datos: pedidosFiltrados };
+  }, [estado, pedidosFiltrados]);
+
   const totalEstimado = useMemo(
     () =>
       items.reduce(
@@ -168,13 +226,26 @@ export function LocalScreen() {
 
   const formatearPrecio = (valor: number) => "$" + valor.toLocaleString("es-CL");
 
-  // ─── Agregar prenda del catálogo rápido ───────────────────────
-  const agregarPrendaCatalogo = (cat: (typeof PRENDAS_CATALOGO)[0]) => {
-    setItems((previos) => {
-      const indice = previos.findIndex(
-        (item) => item.nombre === cat.nombre && item.talla === cat.talla
+  // ─── Agregar prenda del catálogo real (con SKU y límite stock) ──
+  const agregarPrendaCatalogo = (cat: PrendaRapidaSku) => {
+    if (cat.stock <= 0) {
+      setErrorItems(`${cat.nombre} (${cat.talla}) sin stock disponible.`);
+      return;
+    }
+
+    const actualEnCarrito =
+      items.find((it) => it.sku === cat.sku)?.cantidad ?? 0;
+    if (actualEnCarrito >= cat.stock) {
+      setErrorItems(
+        `Stock máximo alcanzado para ${cat.nombre} (${cat.stock} un.).`
       );
+      return;
+    }
+
+    setItems((previos) => {
+      const indice = previos.findIndex((item) => item.sku === cat.sku);
       if (indice >= 0) {
+        if (previos[indice].cantidad >= cat.stock) return previos;
         const copia = [...previos];
         copia[indice] = {
           ...copia[indice],
@@ -185,6 +256,7 @@ export function LocalScreen() {
       return [
         ...previos,
         {
+          sku: cat.sku,
           nombre: cat.nombre,
           cantidad: 1,
           talla: cat.talla,
@@ -215,22 +287,35 @@ export function LocalScreen() {
   };
 
   const cambiarCantidad = (indice: number, delta: number) => {
+    const item = items[indice];
+    if (!item) return;
+    if (delta > 0 && item.sku) {
+      const maxStock = stockPorSku[item.sku] ?? 0;
+      if (item.cantidad + delta > maxStock) {
+        setErrorItems(
+          `Stock disponible para ${item.nombre}: ${maxStock} un.`
+        );
+        return;
+      }
+    }
+
     setItems((previos) =>
       previos
-        .map((item, i) =>
+        .map((it, i) =>
           i === indice
-            ? { ...item, cantidad: Math.max(1, item.cantidad + delta) }
-            : item
+            ? { ...it, cantidad: Math.max(1, it.cantidad + delta) }
+            : it
         )
-        .filter((item) => item.cantidad > 0)
+        .filter((it) => it.cantidad > 0)
     );
+    setErrorItems(null);
   };
 
   const eliminarItem = (indice: number) => {
     setItems((previos) => previos.filter((_, i) => i !== indice));
   };
 
-  // ─── Crear Pedido (POST /v1/pedidos) ──────────────────────────
+  // ─── Crear Pedido rápido (POST /v1/pedidos) ───────────────────
   const handleCrearPedido = useCallback(async () => {
     if (!nombre.trim()) {
       setErrorNombre("Ingresa el nombre de quien recibe el pedido.");
@@ -274,16 +359,14 @@ export function LocalScreen() {
           etiqueta: "Copiar",
           icono: "copy",
           onPress: () => {
-            Clipboard.setStringAsync(codigo).catch(() => {
-              // Si el portapapeles falla, el código sigue visible en la tarjeta.
-            });
+            Clipboard.setStringAsync(codigo).catch(() => { });
             setAviso((previo) =>
               previo
                 ? {
-                  ...previo,
-                  accion: undefined,
-                  mensaje: "Código copiado al portapapeles.",
-                }
+                    ...previo,
+                    accion: undefined,
+                    mensaje: "Código copiado al portapapeles.",
+                  }
                 : previo
             );
           },
@@ -310,9 +393,7 @@ export function LocalScreen() {
   );
 
   const handleCopiarCodigo = useCallback(async (codigo: string) => {
-    await Clipboard.setStringAsync(codigo).catch(() => {
-      // Sin portapapeles disponible: no es motivo para romper el flujo.
-    });
+    await Clipboard.setStringAsync(codigo).catch(() => { });
     setAviso({
       titulo: `Código #${codigo} copiado`,
       mensaje: "Pégalo en el chat con el cliente.",
@@ -320,7 +401,6 @@ export function LocalScreen() {
     });
   }, []);
 
-  // ─── Vaciar datos de despacho ──────────────────────────────────
   const handleVaciarOrdenes = useCallback(async () => {
     await vaciarPedidos();
     await recargar();
@@ -331,7 +411,58 @@ export function LocalScreen() {
     });
   }, [recargar]);
 
-  // ─── Resumen de Métricas de Bodega ─────────────────────────────
+  const handleReponerStock = useCallback(
+    (sku: string, cantidad: number) => {
+      const nuevo = reponerStock(sku, cantidad);
+      if (nuevo !== null) {
+        setAviso({
+          titulo: `Stock actualizado (${sku})`,
+          mensaje: `Ahora hay ${nuevo} unidad(es) disponibles en bodega.`,
+          tono: "exito",
+        });
+      }
+    },
+    [reponerStock]
+  );
+
+  const irANuevoPedido = useCallback(() => {
+    router.push("/nuevo-pedido");
+  }, []);
+
+  const navItems: PortalNavItem[] = useMemo(
+    () =>
+      esAdmin
+        ? [
+            { id: "resumen", etiqueta: "Resumen", icono: "layout-grid" },
+            {
+              id: "bodega",
+              etiqueta: "Bodega",
+              icono: "layers",
+              badge: analitica.skusCriticos.length,
+            },
+            {
+              id: "pedidos",
+              etiqueta: "Pedidos",
+              icono: "package",
+              badge: estadisticas.activos,
+            },
+            { id: "despachos", etiqueta: "Despachos", icono: "truck" },
+            { id: "seguimiento", etiqueta: "Seguimiento", icono: "map" },
+          ]
+        : [
+            {
+              id: "pedidos",
+              etiqueta: "Pedidos",
+              icono: "package",
+              badge: estadisticas.activos,
+            },
+            { id: "despachos", etiqueta: "Despachos", icono: "truck" },
+            { id: "seguimiento", etiqueta: "Seguimiento", icono: "map" },
+          ],
+    [esAdmin, analitica.skusCriticos.length, estadisticas.activos]
+  );
+
+  // ─── Subvista Pedidos (órdenes en curso + formulario rápido) ──
   const resumenMetricas = (
     <View style={styles.metricasGrid}>
       <TarjetaMetrica
@@ -358,7 +489,6 @@ export function LocalScreen() {
     </View>
   );
 
-  // ─── Formulario de Registro de Despacho ────────────────────────
   const formulario = (
     <View
       style={[
@@ -378,7 +508,7 @@ export function LocalScreen() {
         ]}
       >
         <Text style={[tipografia.eyebrowMono, { color: colores.acentoIntenso }]}>
-          NUEVO DESPACHO
+          DESPACHO RÁPIDO
         </Text>
       </View>
 
@@ -389,7 +519,7 @@ export function LocalScreen() {
           { color: colores.tinta },
         ]}
       >
-        Crear orden de venta
+        Crear orden rápida
       </Text>
 
       <CampoTexto
@@ -423,7 +553,6 @@ export function LocalScreen() {
         autoCapitalize="words"
       />
 
-      {/* Catálogo rápido de prendas con flechas >= 44x44 */}
       <View style={styles.catalogoHeader}>
         <Text
           style={[
@@ -431,7 +560,7 @@ export function LocalScreen() {
             { color: colores.tintaTerciaria },
           ]}
         >
-          PRENDAS RÁPIDAS
+          PRENDAS EN STOCK (SKU)
         </Text>
         <View style={styles.catalogoFlechas}>
           <Pressable
@@ -481,67 +610,74 @@ export function LocalScreen() {
         }}
         scrollEventThrottle={16}
       >
-        {PRENDAS_CATALOGO.map((cat) => (
-          <Pressable
-            key={cat.nombre}
-            onPress={() => agregarPrendaCatalogo(cat)}
-            accessibilityRole="button"
-            accessibilityLabel={`Agregar ${cat.nombre}`}
-            style={({ pressed }) => [
-              styles.prendaRapida,
-              {
-                backgroundColor: colores.superficieHundida,
-                borderColor: colores.borde,
-                borderRadius: RADIOS.md,
-                opacity: pressed ? 0.75 : 1,
-              },
-            ]}
-          >
-            <View style={styles.prendaRapidaTop}>
-              <View
-                style={[
-                  styles.prendaTag,
-                  {
-                    backgroundColor: colores.acentoSuave,
-                    borderRadius: RADIOS.pill,
-                  },
-                ]}
-              >
-                <Icon name="plus" size={13} color={colores.acentoIntenso} />
-                <Text
+        {catalogoRapido.map((cat) => {
+          const agotado = cat.stock <= 0;
+          return (
+            <Pressable
+              key={cat.sku}
+              onPress={() => agregarPrendaCatalogo(cat)}
+              disabled={agotado}
+              accessibilityRole="button"
+              accessibilityLabel={`Agregar ${cat.nombre}`}
+              style={({ pressed }) => [
+                styles.prendaRapida,
+                {
+                  backgroundColor: colores.superficieHundida,
+                  borderColor: colores.borde,
+                  borderRadius: RADIOS.md,
+                  opacity: agotado ? 0.5 : pressed ? 0.75 : 1,
+                },
+              ]}
+            >
+              <View style={styles.prendaRapidaTop}>
+                <View
                   style={[
-                    tipografia.caption,
-                    { color: colores.acentoIntenso },
+                    styles.prendaTag,
+                    {
+                      backgroundColor: colores.acentoSuave,
+                      borderRadius: RADIOS.pill,
+                    },
                   ]}
                 >
-                  Talla {cat.talla}
+                  <Icon
+                    name={agotado ? "x" : "plus"}
+                    size={13}
+                    color={colores.acentoIntenso}
+                  />
+                  <Text
+                    style={[
+                      tipografia.caption,
+                      { color: colores.acentoIntenso },
+                    ]}
+                  >
+                    {agotado ? "Agotado" : `${cat.talla} (${cat.stock})`}
+                  </Text>
+                </View>
+                <Text style={[tipografia.micro, { color: colores.tinta }]}>
+                  {formatearPrecio(cat.precio)}
                 </Text>
               </View>
-              <Text style={[tipografia.micro, { color: colores.tinta }]}>
-                {formatearPrecio(cat.precio)}
+              <Text
+                style={[
+                  tipografia.cuerpoFuerte,
+                  styles.prendaRapidaNombre,
+                  { color: colores.tinta },
+                ]}
+                numberOfLines={2}
+              >
+                {cat.nombre}
               </Text>
-            </View>
-            <Text
-              style={[
-                tipografia.cuerpoFuerte,
-                styles.prendaRapidaNombre,
-                { color: colores.tinta },
-              ]}
-              numberOfLines={2}
-            >
-              {cat.nombre}
-            </Text>
-            <Text
-              style={[tipografia.caption, { color: colores.tintaSecundaria }]}
-              numberOfLines={1}
-            >
-              {cat.color}
-            </Text>
-          </Pressable>
-        ))}
+              <Text
+                style={[tipografia.caption, { color: colores.tintaSecundaria }]}
+                numberOfLines={1}
+              >
+                {cat.color} · {cat.sku}
+              </Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
-      {/* Agregar ítem manual */}
       <View style={styles.filaManual}>
         <View style={styles.filaManualCampo}>
           <CampoTexto
@@ -573,7 +709,6 @@ export function LocalScreen() {
         style={styles.botonAgregarManual}
       />
 
-      {/* Prendas agregadas */}
       <View
         style={[
           styles.panelPrendas,
@@ -609,7 +744,7 @@ export function LocalScreen() {
 
         {items.map((item, indice) => (
           <View
-            key={`${item.nombre}-${indice}`}
+            key={`${item.sku ?? item.nombre}-${indice}`}
             style={[
               styles.prendaItemTarjeta,
               {
@@ -726,7 +861,6 @@ export function LocalScreen() {
     </View>
   );
 
-  // ─── Lista de Despachos en Curso ──────────────────────────────
   const encabezadoLista = (
     <View style={styles.listaEncabezado}>
       <Masthead
@@ -739,29 +873,38 @@ export function LocalScreen() {
             : `${estadisticas.activos} en ruta · ${estadisticas.entregados} entregadas de ${estadisticas.total} órdenes.`
         }
         acciones={
-          estadisticas.total > 0 ? (
-            <Pressable
-              onPress={handleVaciarOrdenes}
-              accessibilityRole="button"
-              accessibilityLabel="Vaciar las órdenes registradas"
-              style={({ pressed }) => [
-                styles.botonIcono,
-                {
-                  minWidth: puntoMinimo,
-                  minHeight: puntoMinimo,
-                  borderColor: colores.borde,
-                  backgroundColor: colores.superficie,
-                  opacity: pressed ? 0.7 : 1,
-                },
-              ]}
-            >
-              <Icon
-                name="rotate-ccw"
-                size={17}
-                color={colores.tintaSecundaria}
+          <>
+            {esAdmin && estadisticas.total > 0 ? (
+              <Pressable
+                onPress={handleVaciarOrdenes}
+                accessibilityRole="button"
+                accessibilityLabel="Vaciar las órdenes registradas"
+                style={({ pressed }) => [
+                  styles.botonIcono,
+                  {
+                    minWidth: puntoMinimo,
+                    minHeight: puntoMinimo,
+                    borderColor: colores.borde,
+                    backgroundColor: colores.superficie,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Icon
+                  name="rotate-ccw"
+                  size={17}
+                  color={colores.tintaSecundaria}
+                />
+              </Pressable>
+            ) : null}
+            {esAdmin ? (
+              <Boton
+                etiqueta="+ Nuevo pedido"
+                compacto
+                onPress={irANuevoPedido}
               />
-            </Pressable>
-          ) : undefined
+            ) : null}
+          </>
         }
       />
     </View>
@@ -769,12 +912,25 @@ export function LocalScreen() {
 
   const listaPedidos = (
     <EstadoUIRenderer
-      estado={estado}
-      mensajeVacio="No hay despachos registrados. Crea una orden para comenzar."
-      accionVacia={{
-        etiqueta: "Crear la primera orden",
-        onPress: () => scrollFormRef.current?.scrollTo({ y: 0, animated: true }),
-      }}
+      estado={estadoPedidosFiltrados}
+      mensajeVacio={
+        busquedaGlobal.trim()
+          ? `Sin órdenes para "${busquedaGlobal.trim()}".`
+          : "No hay despachos registrados. Crea una orden para comenzar."
+      }
+      accionVacia={
+        busquedaGlobal.trim()
+          ? {
+              etiqueta: "Limpiar búsqueda",
+              onPress: () => setBusquedaGlobal(""),
+            }
+          : {
+              etiqueta: esAdmin ? "Nuevo pedido completo" : "Crear la primera orden",
+              onPress: esAdmin
+                ? irANuevoPedido
+                : () => scrollFormRef.current?.scrollTo({ y: 0, animated: true }),
+            }
+      }
       onReintentar={recargar}
       renderDatos={(datos: Pedido[]) => (
         <View style={styles.tarjetasLista}>
@@ -802,10 +958,49 @@ export function LocalScreen() {
     />
   );
 
+  const renderPedidos = () => (
+    <View style={styles.pedidosWrap}>
+      {resumenMetricas}
+      {esAncho ? (
+        <View style={styles.columnasAncho}>
+          <View style={styles.columnaFormulario}>{formulario}</View>
+          <View style={styles.columnaLista}>
+            {encabezadoLista}
+            {listaPedidos}
+          </View>
+        </View>
+      ) : (
+        <View style={styles.pedidosMovilStack}>
+          {formulario}
+          {encabezadoLista}
+          {listaPedidos}
+        </View>
+      )}
+    </View>
+  );
+
   return (
-    <SafeAreaView
-      style={[styles.safe, { backgroundColor: colores.fondo }]}
-      edges={["top"]}
+    <PortalShell
+      rolLabel="Operación"
+      usuarioIniciales={inicialesUsuario}
+      usuarioNombre={nombreUsuario}
+      usuarioRol={rolUsuario}
+      items={navItems}
+      vistaActiva={vistaActiva}
+      onCambiarVista={(id) => setVista(id as VistaAdmin)}
+      accionExtra={
+        esAdmin
+          ? {
+              etiqueta: "Nuevo pedido",
+              icono: "plus",
+              onPress: irANuevoPedido,
+            }
+          : undefined
+      }
+      busqueda={busquedaGlobal}
+      onCambiarBusqueda={setBusquedaGlobal}
+      placeholderBusqueda="Buscar pedido, cliente o SKU…"
+      mostrarSalir
     >
       <AvisoFlotante
         visible={aviso !== null}
@@ -821,75 +1016,52 @@ export function LocalScreen() {
         style={styles.contenedor}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {esAncho ? (
-          <View style={styles.layoutAncho}>
-            <View style={styles.marcaAncho}>
-              <Masthead
-                eyebrow="Atelier Noir · Bodega"
-                titulo="Bodega y despacho"
-                variante="tecnico"
-                descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
-                acciones={
-                  <>
-                    <BotonSalir />
-                    <InterruptorTema />
-                  </>
-                }
+        <ScrollView
+          ref={scrollFormRef}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[
+            styles.contenidoScroll,
+            esAncho && styles.contenidoScrollAncho,
+          ]}
+        >
+          <View style={styles.contenidoInner}>
+            {vistaActiva === "resumen" ? (
+              <AdminResumenView
+                nombreAdmin={nombreUsuario}
+                pedidos={pedidos}
+                analitica={analitica}
+                onIrVista={(v) => setVista(v)}
+                onNuevoPedido={irANuevoPedido}
+                onAvanzar={handleAvanzarEstado}
               />
-              {resumenMetricas}
-            </View>
-
-            <View style={styles.columnasAncho}>
-              <ScrollView
-                ref={scrollFormRef}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={[
-                  styles.columnaScroll,
-                  styles.columnaFormulario,
-                ]}
-              >
-                {formulario}
-              </ScrollView>
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={[
-                  styles.columnaScroll,
-                  styles.columnaLista,
-                ]}
-              >
-                {encabezadoLista}
-                {listaPedidos}
-              </ScrollView>
-            </View>
+            ) : vistaActiva === "bodega" ? (
+              <AdminBodegaView
+                analitica={analitica}
+                busqueda={busquedaGlobal}
+                onReponer={handleReponerStock}
+              />
+            ) : vistaActiva === "despachos" ? (
+              <AdminDespachosView
+                pedidos={pedidos}
+                analitica={analitica}
+                onNuevoPedido={irANuevoPedido}
+                onAvanzar={handleAvanzarEstado}
+              />
+            ) : vistaActiva === "seguimiento" ? (
+              <AdminSeguimientoView
+                pedidos={pedidos}
+                analitica={analitica}
+                onRefrescar={() => void recargar()}
+                onAvanzar={handleAvanzarEstado}
+              />
+            ) : (
+              renderPedidos()
+            )}
           </View>
-        ) : (
-          <ScrollView
-            ref={scrollFormRef}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.scrollMovil}
-          >
-            <Masthead
-              eyebrow="Atelier Noir · Bodega"
-              titulo="Bodega y despacho"
-              variante="tecnico"
-              descripcion="Registra nuevas órdenes de venta y avanza su estado de despacho en tiempo real."
-              acciones={
-                <>
-                  <BotonSalir />
-                  <InterruptorTema />
-                </>
-              }
-            />
-            {resumenMetricas}
-            {formulario}
-            {encabezadoLista}
-            {listaPedidos}
-          </ScrollView>
-        )}
+        </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </PortalShell>
   );
 }
 
@@ -899,27 +1071,27 @@ function prendasPlural(cantidad: number): string {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
   contenedor: {
     flex: 1,
   },
-  scrollMovil: {
+  contenidoScroll: {
+    flexGrow: 1,
     padding: ESPACIOS.lg,
     paddingBottom: ESPACIOS.xxl * 2,
-    gap: ESPACIOS.lg,
   },
-  layoutAncho: {
-    flex: 1,
-    paddingHorizontal: ESPACIOS.lg,
-    paddingTop: ESPACIOS.lg,
-    gap: ESPACIOS.lg,
+  contenidoScrollAncho: {
+    padding: ESPACIOS.xl,
   },
-  marcaAncho: {
+  contenidoInner: {
     width: "100%",
-    maxWidth: 1180,
+    maxWidth: 1200,
     alignSelf: "center",
+  },
+  pedidosWrap: {
+    gap: ESPACIOS.lg,
+  },
+  pedidosMovilStack: {
+    gap: ESPACIOS.lg,
   },
   metricasGrid: {
     flexDirection: "row",
@@ -927,19 +1099,13 @@ const styles = StyleSheet.create({
     gap: ESPACIOS.md,
   },
   columnasAncho: {
-    flex: 1,
     flexDirection: "row",
+    alignItems: "flex-start",
     gap: ESPACIOS.lg,
-    width: "100%",
-    maxWidth: 1180,
-    alignSelf: "center",
-  },
-  columnaScroll: {
-    paddingBottom: ESPACIOS.xxl * 2,
   },
   columnaFormulario: {
     flex: 1,
-    maxWidth: 480,
+    maxWidth: 460,
   },
   columnaLista: {
     flex: 1.15,

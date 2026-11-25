@@ -23,7 +23,7 @@ import { CampoTexto } from "../components/CampoTexto";
 import { Icon } from "../components/Icon";
 import { InterruptorTema } from "../components/InterruptorTema";
 import { useAuth } from "../context/AuthContext";
-import { ADMIN_DEMO, MIN_CLAVE } from "../services/authLocal";
+import { ADMIN_DEMO, MIN_CLAVE, MODO_DEMO_AUTH } from "../services/authLocal";
 import { useTema } from "../theme/ThemeProvider";
 import {
   BREAKPOINTS,
@@ -226,7 +226,7 @@ export function LoginScreen() {
                     etiqueta="Usuario o correo"
                     valor={usuario}
                     onCambio={setUsuario}
-                    placeholder="admin"
+                    placeholder="tu.usuario"
                     icono="user"
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -242,9 +242,7 @@ export function LoginScreen() {
                     autoCapitalize="none"
                     autoCorrect={false}
                     ayuda={
-                      modoRegistro
-                        ? `Mínimo ${MIN_CLAVE} caracteres.`
-                        : `Acceso admin prototipo: usuario "${ADMIN_DEMO.usuario}" / clave "${ADMIN_DEMO.clave}".`
+                      modoRegistro ? `Mínimo ${MIN_CLAVE} caracteres.` : undefined
                     }
                     returnKeyType={modoRegistro ? "next" : "go"}
                     onSubmit={modoRegistro ? undefined : enviar}
@@ -415,36 +413,38 @@ export function LoginScreen() {
                           </Text>
                         </Pressable>
 
-                        <Pressable
-                          onPress={explorarComoAdmin}
-                          disabled={enviando}
-                          accessibilityRole="button"
-                          accessibilityLabel="Ingresar como admin a bodega"
-                          style={({ pressed }) => [
-                            styles.demoBtn,
-                            {
-                              minHeight: puntoMinimo,
-                              backgroundColor: colores.acentoSuave,
-                              borderColor: colores.acento,
-                              borderRadius: RADIOS.sm,
-                              opacity: enviando ? 0.5 : pressed ? 0.75 : 1,
-                            },
-                          ]}
-                        >
-                          <Icon
-                            name="shield-check"
-                            size={15}
-                            color={colores.acentoIntenso}
-                          />
-                          <Text
-                            style={[
-                              tipografia.etiqueta,
-                              { color: colores.acentoIntenso },
+                        {MODO_DEMO_AUTH ? (
+                          <Pressable
+                            onPress={explorarComoAdmin}
+                            disabled={enviando}
+                            accessibilityRole="button"
+                            accessibilityLabel="Ingresar como admin a bodega"
+                            style={({ pressed }) => [
+                              styles.demoBtn,
+                              {
+                                minHeight: puntoMinimo,
+                                backgroundColor: colores.acentoSuave,
+                                borderColor: colores.acento,
+                                borderRadius: RADIOS.sm,
+                                opacity: enviando ? 0.5 : pressed ? 0.75 : 1,
+                              },
                             ]}
                           >
-                            Vista admin
-                          </Text>
-                        </Pressable>
+                            <Icon
+                              name="shield-check"
+                              size={15}
+                              color={colores.acentoIntenso}
+                            />
+                            <Text
+                              style={[
+                                tipografia.etiqueta,
+                                { color: colores.acentoIntenso },
+                              ]}
+                            >
+                              Vista admin
+                            </Text>
+                          </Pressable>
+                        ) : null}
                       </View>
                     </View>
                   )}
