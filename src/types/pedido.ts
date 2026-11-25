@@ -1,12 +1,8 @@
-// ─── Tipos del dominio: E-commerce de Ropa & Vestuario ───────────
+// ─── Tipos del dominio: Atelier Noir E-commerce & Operaciones ────
 //
-// Cumple con la restricción de rúbrica UTEM:
-// "type EstadoPedido = 'recibido' | 'preparing' | 'listo' | 'entregado'"
-// Aplicado al dominio de e-commerce de moda y despacho de prendas.
-//
-// Nota de diseño: las etiquetas son texto plano, sin emoji. El icono de
-// cada estado vive aparte (ICONOS_ESTADO) y lo pinta el componente con
-// Lucide, de modo que el mismo estado se ve igual en todas las pantallas.
+// Preserva la máquina de estados UTEM (`EstadoPedido`, `FLUJO_ESTADOS`,
+// `EstadoUI<T>`) y añade tipado estricto para clientes CRM, variantes SKU
+// con stock en vivo, analítica en una sola pasada y creación de pedidos Admin.
 
 import type { LucideIconName } from "@react-native-vector-icons/lucide";
 
@@ -19,32 +15,29 @@ export const FLUJO_ESTADOS: EstadoPedido[] = [
   "entregado",
 ];
 
-// Etiquetas del estado: se muestran en el badge, en el stepper y en el
-// botón de avance. Cortas, en español de Chile, sin símbolos.
 export const ETIQUETAS_ESTADO: Record<EstadoPedido, string> = {
-  recibido: "Orden confirmada",
+  recibido: "Confirmado",
   preparando: "En preparación",
   listo: "En camino",
   entregado: "Entregado",
 };
 
-// Etiquetas cortas para el stepper de 4 pasos, donde el ancho es escaso.
 export const ETIQUETAS_ESTADO_CORTA: Record<EstadoPedido, string> = {
-  recibido: "Confirmada",
+  recibido: "Confirmado",
   preparando: "Preparando",
   listo: "En camino",
   entregado: "Entregado",
 };
 
-// Subtítulos explicativos del paso actual para el cliente
 export const DESCRIPCIONES_ESTADO: Record<EstadoPedido, string> = {
   recibido: "Tu pago fue aprobado y la orden ingresó al sistema de bodega.",
-  preparando: "Estamos seleccionando tus prendas, revisando calidad y armando el empaque.",
-  listo: "Tu paquete fue entregado al courier y se encuentra en ruta a tu dirección.",
+  preparando:
+    "Estamos seleccionando tus prendas, revisando calidad y armando el empaque.",
+  listo:
+    "Tu paquete fue entregado al courier y se encuentra en ruta a tu dirección.",
   entregado: "El paquete fue entregado exitosamente en tu domicilio.",
 };
 
-// Icono Lucide asociado a cada estado del flujo.
 export const ICONOS_ESTADO: Record<EstadoPedido, LucideIconName> = {
   recibido: "package",
   preparando: "shirt",
@@ -52,8 +45,12 @@ export const ICONOS_ESTADO: Record<EstadoPedido, LucideIconName> = {
   entregado: "circle-check",
 };
 
-// Ítem de vestuario
+export type Transportista = "Bluex" | "Starken" | "Chilexpress";
+export type MetodoPago = "Transferencia" | "Link de pago" | "Débito / Crédito";
+export type TonoProducto = "dark" | "ice" | "cobalt" | "steel";
+
 export interface ItemPedido {
+  sku?: string;
   nombre: string;
   cantidad: number;
   talla?: string;
@@ -61,11 +58,12 @@ export interface ItemPedido {
   precioUnitario?: number;
 }
 
-// Estructura completa de un pedido de ropa
 export interface Pedido {
   codigo: string;
+  clienteId?: string;
   clienteNombre: string;
   clienteEmail?: string;
+  clienteTelefono?: string;
   direccionDespacho: string;
   comuna: string;
   items: ItemPedido[];
@@ -73,10 +71,87 @@ export interface Pedido {
   creadoEn: string;
   actualizadoEn: string;
   metodoEnvio: string;
+  transportista?: Transportista;
+  ventanaHoraria?: string;
+  notaInterna?: string;
+  subtotal?: number;
+  ivaIncluido?: number;
+  costoEnvio?: number;
+  metodoPago?: MetodoPago;
   totalEstimado: number;
+  creadoPorAdmin?: boolean;
+  idempotencyKey?: string;
 }
 
-// Estado de UI discriminado
+export interface CrearPedidoOpciones {
+  clienteId?: string;
+  clienteEmail?: string;
+  clienteTelefono?: string;
+  transportista?: Transportista;
+  ventanaHoraria?: string;
+  notaInterna?: string;
+  metodoPago?: MetodoPago;
+  costoEnvio?: number;
+  creadoPorAdmin?: boolean;
+  idempotencyKey?: string;
+}
+
+export interface ClienteAdmin {
+  id: string;
+  nombre: string;
+  correo: string;
+  telefono: string;
+  totalPedidos: number;
+  ultimoPedidoCodigo?: string;
+  ultimoPedidoFecha?: string;
+  direccionHabitual?: string;
+  comunaHabitual?: string;
+}
+
+export interface VarianteProductoAdmin {
+  sku: string;
+  talla: string;
+  stock: number;
+  stockInicial: number;
+}
+
+export interface ProductoCatalogoAdmin {
+  id: string;
+  nombre: string;
+  categoria: string;
+  color: string;
+  precio: number;
+  tono: TonoProducto;
+  variantes: VarianteProductoAdmin[];
+}
+
+export interface SkuInventarioPlano {
+  productoId: string;
+  nombre: string;
+  categoria: string;
+  tono: TonoProducto;
+  precio: number;
+  sku: string;
+  talla: string;
+  stock: number;
+  stockInicial: number;
+}
+
+export interface AnaliticaOperacion {
+  total: number;
+  activos: number;
+  entregados: number;
+  porEstado: Record<EstadoPedido, number>;
+  ventasNetas: number;
+  ticketPromedio: number;
+  porComuna: { comuna: string; cantidad: number; porcentaje: number }[];
+  mixCategorias: { categoria: string; unidades: number; porcentaje: number }[];
+  stockTotalUnidades: number;
+  skusActivosCount: number;
+  skusCriticos: SkuInventarioPlano[];
+  inventarioPlano: SkuInventarioPlano[];
+}
+
 export type EstadoUI<T> =
   | { tipo: "cargando" }
   | { tipo: "error"; mensaje: string }

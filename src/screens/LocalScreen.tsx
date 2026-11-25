@@ -87,7 +87,7 @@ export function LocalScreen() {
       typeof ref.getScrollableNode === "function"
         ? ref.getScrollableNode()
         : ref._scrollNodeRef ??
-          (typeof ref.scrollBy === "function" || "scrollLeft" in ref ? ref : null);
+        (typeof ref.scrollBy === "function" || "scrollLeft" in ref ? ref : null);
 
     if (domNode) {
       if (typeof domNode.scrollBy === "function") {
@@ -280,10 +280,10 @@ export function LocalScreen() {
             setAviso((previo) =>
               previo
                 ? {
-                    ...previo,
-                    accion: undefined,
-                    mensaje: "Código copiado al portapapeles.",
-                  }
+                  ...previo,
+                  accion: undefined,
+                  mensaje: "Código copiado al portapapeles.",
+                }
                 : previo
             );
           },

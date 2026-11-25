@@ -4,8 +4,15 @@ import {
   crearPedido,
   avanzarEstado,
   vaciarPedidos,
-  resetearSemilla,
+  detectarDuplicadoReciente,
 } from "../src/services/pedidosApi";
+import {
+  calcularAnaliticaOperacion,
+  calcularTotalesChile,
+  obtenerCatalogoConStock,
+  obtenerStockPorSku,
+  reponerStockSku,
+} from "../src/services/operacionesMock";
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -63,22 +70,78 @@ async function runTests() {
 
   // 5. Transición completa de estados
   console.log("\n5. Ciclo de despacho de moda (recibido -> preparando -> listo -> entregado):");
-  // recibido -> preparando (Pick & Pack en Bodega)
   const p1 = await avanzarEstado(codigo);
   assert(p1.status === 200 && p1.data?.estado === "preparando", "Avanzado a 'preparando' (Pick & Pack)");
 
-  // preparando -> listo (Despachado / Con Courier)
   const p2 = await avanzarEstado(codigo);
   assert(p2.status === 200 && p2.data?.estado === "listo", "Avanzado a 'listo' (En ruta con courier)");
 
-  // listo -> entregado (Entregado con Éxito)
   const p3 = await avanzarEstado(codigo);
   assert(p3.status === 200 && p3.data?.estado === "entregado", "Avanzado a 'entregado'");
 
-  // Intento de avance adicional (409 Conflict)
   const p4 = await avanzarEstado(codigo);
   assert(p4.status === 409, "Retorna 409 Conflict al intentar avanzar orden ya entregada");
 
+  // 6. Reglas Admin, Stock O(1) y Analítica en 1 pasada
+  console.log("\n6. Verificando reglas Admin, Stock O(1), Idempotencia y Analítica:");
+  const totMenor = calcularTotalesChile(54990);
+  assert(totMenor.envio === 4990, "Envío de $4.990 bajo $80.000 CLP");
+  assert(totMenor.total === 54990 + 4990, "Total incluye envío bajo umbral");
+  assert(totMenor.ivaIncluido === Math.round(54990 - 54990 / 1.19), "IVA 19% incluido calculado correctamente");
+
+  const totGratis = calcularTotalesChile(80000);
+  assert(totGratis.envio === 0 && totGratis.total === 80000, "Envío gratis desde $80.000 CLP");
+
+  const stockAntes = obtenerStockPorSku("AN-HDY-M") ?? 0;
+  const resAdmin = await crearPedido(
+    "Martina Soto",
+    "Av. Providencia 1450",
+    "Providencia",
+    [{ sku: "AN-HDY-M", nombre: "Noir Core Hoodie", talla: "M", cantidad: 1, precioUnitario: 54990 }],
+    "Bluex · 09:00 – 13:00 (AM)",
+    {
+      clienteId: "cli-01",
+      transportista: "Bluex",
+      metodoPago: "Transferencia",
+      creadoPorAdmin: true,
+      idempotencyKey: "key-test-1",
+    }
+  );
+  assert(resAdmin.status === 201 && resAdmin.ok, "Pedido admin creado (201)");
+  assert((obtenerStockPorSku("AN-HDY-M") ?? -1) === stockAntes - 1, "Stock descontado atómicamente vía índice O(1)");
+  assert(resAdmin.data.totalEstimado === 59980, "Total admin incluye envío ($54.990 + $4.990 = $59.980)");
+
+  const stockRepuesto = reponerStockSku("AN-HDY-M", 1);
+  assert(stockRepuesto === stockAntes, "Reposición de stock en bodega funciona en O(1)");
+
+  const resIdem = await crearPedido(
+    "Martina Soto",
+    "Av. Providencia 1450",
+    "Providencia",
+    [{ sku: "AN-HDY-M", nombre: "Noir Core Hoodie", talla: "M", cantidad: 1, precioUnitario: 54990 }],
+    "Bluex",
+    { creadoPorAdmin: true, idempotencyKey: "key-test-1" }
+  );
+  assert(resIdem.status === 409 && resIdem.errorCode === "IDEMPOTENCY_DUPLICATE", "Doble clic bloqueado por idempotencyKey");
+
+  const resSinStock = await crearPedido(
+    "Martina Soto",
+    "Av. Providencia 1450",
+    "Providencia",
+    [{ sku: "AN-HDY-M", nombre: "Noir Core Hoodie", talla: "M", cantidad: 99, precioUnitario: 54990 }],
+    "Bluex",
+    { creadoPorAdmin: true, idempotencyKey: "key-test-2" }
+  );
+  assert(resSinStock.status === 409 && resSinStock.errorCode === "INSUFFICIENT_STOCK", "Stock insuficiente rechazado con 409");
+
+  const dup = detectarDuplicadoReciente("Martina Soto", 59980, "cli-01");
+  assert(dup !== null && dup.codigo === resAdmin.data.codigo, "Detección de pedido duplicado reciente activa");
+
+  const analitica = calcularAnaliticaOperacion([resAdmin.data], obtenerCatalogoConStock());
+  assert(analitica.total === 1 && analitica.ventasNetas === 59980, "Analítica en una sola pasada calcula totales reales");
+  assert(analitica.porComuna[0]?.comuna === "Providencia", "Analítica por comuna RM agrupa correctamente");
+
+  await vaciarPedidos();
   console.log("\n🎉 TODAS LAS PRUEBAS AUTOMATIZADAS PASARON SATISFACTORIAMENTE (100% OK).");
 }
 

@@ -110,12 +110,28 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
           <Text
             style={[
               tipografia.caption,
-              { color: colores.acentoIntenso, fontFamily: FUENTES.semi },
+              { color: colores.acentoIntenso, fontFamily: FUENTES.semi, flex: 1 },
             ]}
           >
             {pedido.metodoEnvio}
+            {pedido.metodoPago ? ` · ${pedido.metodoPago}` : ""}
           </Text>
         </View>
+        {pedido.notaInterna ? (
+          <View style={styles.lineaDato}>
+            <Icon name="file-text" size={14} color={colores.tintaTerciaria} />
+            <Text
+              style={[
+                tipografia.caption,
+                styles.textoDato,
+                { color: colores.tintaSecundaria },
+              ]}
+              numberOfLines={2}
+            >
+              Nota bodega: {pedido.notaInterna}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {/* Contenido del paquete */}

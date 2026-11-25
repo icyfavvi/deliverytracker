@@ -1,9 +1,13 @@
 // ─── Contexto de sesión ──────────────────────────────────────────
-//
-// Expone quién está dentro y las acciones de entrar, registrarse y salir.
-// `cargando` es true solo mientras se restaura la sesión guardada.
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import * as auth from "../services/authLocal";
 import type { Sesion } from "../services/authLocal";
@@ -23,10 +27,16 @@ export function ProveedorAuth({ children }: { children: React.ReactNode }) {
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
+    let activo = true;
     auth.leerSesion().then((s) => {
-      setSesion(s);
-      setCargando(false);
+      if (activo) {
+        setSesion(s);
+        setCargando(false);
+      }
     });
+    return () => {
+      activo = false;
+    };
   }, []);
 
   const entrar = useCallback(async (u: string, c: string) => {
@@ -42,7 +52,7 @@ export function ProveedorAuth({ children }: { children: React.ReactNode }) {
 
   const valor = useMemo(
     () => ({ sesion, cargando, entrar, registrarse, salir }),
-    [sesion, cargando, entrar, registrarse, salir],
+    [sesion, cargando, entrar, registrarse, salir]
   );
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>;
 }

@@ -1,11 +1,8 @@
 // ─── Contexto de pedidos ─────────────────────────────────────────
 //
-// Fuente única de verdad. Antes cada pantalla cargaba y organizaba su
-// propia lista; ahora hay un solo lugar que habla con la API, y las
-// pantallas leen estado derivado (conteos, orden) de acá.
-//
-// Esto también habilita el badge vivo de la barra de pestañas: el número
-// de órdenes en ruta es el mismo dato que ve el bodega, no una copia.
+// Fuente única de verdad compartida entre Bodega/Admin y Cliente.
+// Mantiene estado discriminado, suscripción reactiva al catálogo y
+// analítica agregada en una sola pasada O(P + V).
 
 import React, {
   createContext,
@@ -18,10 +15,24 @@ import React, {
 
 import {
   avanzarEstado,
+  ConflictoStock,
   crearPedido,
   obtenerPedidos,
+  suscribirACambios,
 } from "../services/pedidosApi";
-import { EstadoUI, ItemPedido, Pedido } from "../types/pedido";
+import {
+  calcularAnaliticaOperacion,
+  obtenerCatalogoConStock,
+  suscribirStock,
+} from "../services/operacionesMock";
+import {
+  AnaliticaOperacion,
+  CrearPedidoOpciones,
+  EstadoUI,
+  ItemPedido,
+  Pedido,
+  ProductoCatalogoAdmin,
+} from "../types/pedido";
 
 export interface EstadisticasPedidos {
   total: number;
@@ -33,25 +44,27 @@ export interface ResultadoAccion {
   ok: boolean;
   mensaje?: string;
   codigo?: string;
+  pedido?: Pedido;
+  errorCode?: "VALIDATION" | "IDEMPOTENCY_DUPLICATE" | "INSUFFICIENT_STOCK";
+  conflictosStock?: ConflictoStock[];
 }
 
 interface ValorPedidos {
-  /** Estado discriminado de la lista: cargando / error / vacío / datos. */
   estado: EstadoUI<Pedido[]>;
-  /** Datos actuales (vacío si no hay). */
   pedidos: Pedido[];
-  /** Estado derivado para la UI. */
+  catalogo: ProductoCatalogoAdmin[];
+  analitica: AnaliticaOperacion;
   estadisticas: EstadisticasPedidos;
-  /** Hay una recarga en curso sin perder los datos visibles. */
   refrescando: boolean;
-  /** Marca de tiempo de la última carga exitosa. */
   ultimaActualizacion: number | null;
   recargar: () => Promise<void>;
   crearOrden: (
     nombre: string,
     direccion: string,
     comuna: string,
-    items: ItemPedido[]
+    items: ItemPedido[],
+    metodoEnvio?: string,
+    opciones?: CrearPedidoOpciones
   ) => Promise<ResultadoAccion>;
   avanzar: (codigo: string) => Promise<ResultadoAccion>;
 }
@@ -59,13 +72,18 @@ interface ValorPedidos {
 const ContextoPedidos = createContext<ValorPedidos | null>(null);
 
 export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
-  const [estado, setEstado] = useState<EstadoUI<Pedido[]>>({ tipo: "cargando" });
+  const [estado, setEstado] = useState<EstadoUI<Pedido[]>>({
+    tipo: "cargando",
+  });
+  const [catalogo, setCatalogo] = useState<ProductoCatalogoAdmin[]>(() =>
+    obtenerCatalogoConStock()
+  );
   const [refrescando, setRefrescando] = useState(false);
-  const [ultimaActualizacion, setUltimaActualizacion] = useState<number | null>(null);
+  const [ultimaActualizacion, setUltimaActualizacion] = useState<number | null>(
+    null
+  );
 
   const recargar = useCallback(async () => {
-    // Un tick antes de tocar el estado: el primer render no encadena
-    // una actualización y evitamos el render en cascada al montar.
     await Promise.resolve();
     setRefrescando(true);
     try {
@@ -79,10 +97,13 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       }
       const ordenados = [...res.data].sort(
         (a, b) =>
-          new Date(b.actualizadoEn).getTime() - new Date(a.actualizadoEn).getTime()
+          new Date(b.actualizadoEn).getTime() -
+          new Date(a.actualizadoEn).getTime()
       );
       setEstado(
-        ordenados.length === 0 ? { tipo: "vacio" } : { tipo: "datos", datos: ordenados }
+        ordenados.length === 0
+          ? { tipo: "vacio" }
+          : { tipo: "datos", datos: ordenados }
       );
       setUltimaActualizacion(Date.now());
     } catch {
@@ -95,7 +116,6 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // ─── Carga inicial (reutiliza recargar sin duplicar lógica) ────
   useEffect(() => {
     let cancelado = false;
     const inicializar = async () => {
@@ -111,8 +131,18 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       }
     };
     inicializar();
+
+    const unsubPedidos = suscribirACambios(() => {
+      if (!cancelado) void recargar();
+    });
+    const unsubStock = suscribirStock(() => {
+      if (!cancelado) setCatalogo(obtenerCatalogoConStock());
+    });
+
     return () => {
       cancelado = true;
+      unsubPedidos();
+      unsubStock();
     };
   }, [recargar]);
 
@@ -121,18 +151,34 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       nombre: string,
       direccion: string,
       comuna: string,
-      items: ItemPedido[]
+      items: ItemPedido[],
+      metodoEnvio?: string,
+      opciones?: CrearPedidoOpciones
     ): Promise<ResultadoAccion> => {
       try {
-        const res = await crearPedido(nombre, direccion, comuna, items);
+        const res = await crearPedido(
+          nombre,
+          direccion,
+          comuna,
+          items,
+          metodoEnvio,
+          opciones
+        );
         if (!res.ok) {
           return {
             ok: false,
-            mensaje: `No se pudo crear la orden (HTTP ${res.status}).`,
+            errorCode: res.errorCode,
+            conflictosStock: res.conflictosStock,
+            mensaje:
+              res.errorCode === "INSUFFICIENT_STOCK"
+                ? "El stock disponible cambió mientras armabas el pedido."
+                : res.errorCode === "IDEMPOTENCY_DUPLICATE"
+                  ? "Este pedido ya fue enviado."
+                  : `No se pudo crear la orden (HTTP ${res.status}).`,
           };
         }
         await recargar();
-        return { ok: true, codigo: res.data.codigo };
+        return { ok: true, codigo: res.data.codigo, pedido: res.data };
       } catch {
         return {
           ok: false,
@@ -162,24 +208,31 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
     [recargar]
   );
 
-  // La lista vive memorizada: si se recreara en cada render, los
-  // cálculos derivados de abajo se rehacerían sin necesidad.
   const pedidos = useMemo(
     () => (estado.tipo === "datos" ? estado.datos : []),
     [estado]
   );
 
-  const estadisticas = useMemo<EstadisticasPedidos>(() => {
-    const total = pedidos.length;
-    const activos = pedidos.filter((p) => p.estado !== "entregado").length;
-    const entregados = total - activos;
-    return { total, activos, entregados };
-  }, [pedidos]);
+  const analitica = useMemo(
+    () => calcularAnaliticaOperacion(pedidos, catalogo),
+    [pedidos, catalogo]
+  );
+
+  const estadisticas = useMemo<EstadisticasPedidos>(
+    () => ({
+      total: analitica.total,
+      activos: analitica.activos,
+      entregados: analitica.entregados,
+    }),
+    [analitica]
+  );
 
   const valor = useMemo<ValorPedidos>(
     () => ({
       estado,
       pedidos,
+      catalogo,
+      analitica,
       estadisticas,
       refrescando,
       ultimaActualizacion,
@@ -190,6 +243,8 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
     [
       estado,
       pedidos,
+      catalogo,
+      analitica,
       estadisticas,
       refrescando,
       ultimaActualizacion,
