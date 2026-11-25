@@ -51,3 +51,7 @@ yarn-error.*
 # Graphify local code knowledge graph
 graphify-out/
 .graphify/
+
+# SQA coverage & E2E artifacts
+coverage/
+tests/e2e/artifacts/
