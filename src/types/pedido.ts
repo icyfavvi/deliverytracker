@@ -81,6 +81,14 @@ export interface Pedido {
   totalEstimado: number;
   creadoPorAdmin?: boolean;
   idempotencyKey?: string;
+  /** La orden fue cancelada por el cliente o por bodega. */
+  cancelado?: boolean;
+  /** Marca de tiempo ISO de la cancelación. */
+  canceladoEn?: string;
+  /** Motivo legible de la cancelación. */
+  motivoCancelacion?: string;
+  /** Bitácora de estados (incluye la entrada `cancelado`). */
+  historialEstados?: { estado: string; fecha: string }[];
 }
 
 export interface CrearPedidoOpciones {

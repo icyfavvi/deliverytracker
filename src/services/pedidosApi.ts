@@ -18,6 +18,7 @@ import {
 import {
   calcularTotalesChile,
   registrarPedidoEnCliente,
+  restaurarStockAtomico,
   validarYDescontarStockAtomico,
 } from "./operacionesMock";
 
@@ -178,7 +179,7 @@ export interface ConflictoStock {
   disponible: number;
 }
 
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   ok: boolean;
   status: number;
   data: T;
@@ -329,6 +330,7 @@ export async function crearPedido(
     actualizadoEn: ahora,
     creadoPorAdmin: opciones?.creadoPorAdmin,
     idempotencyKey: opciones?.idempotencyKey,
+    historialEstados: [{ estado: "recibido", fecha: ahora }],
   };
 
   persistirAlmacen({ ...pedidosCache, [nuevo.codigo]: nuevo });
@@ -351,16 +353,74 @@ export async function avanzarEstado(
     return respuesta(404, null);
   }
 
+  // Una orden cancelada es terminal: no admiten avance de estado.
+  if (pedido.cancelado) {
+    return respuesta(409, pedido);
+  }
+
   const indiceActual = FLUJO_ESTADOS.indexOf(pedido.estado);
   if (indiceActual === FLUJO_ESTADOS.length - 1) {
     return respuesta(409, pedido);
   }
 
+  const ahora = new Date().toISOString();
   const nuevoEstado: EstadoPedido = FLUJO_ESTADOS[indiceActual + 1];
   const actualizado: Pedido = {
     ...pedido,
     estado: nuevoEstado,
-    actualizadoEn: new Date().toISOString(),
+    actualizadoEn: ahora,
+    historialEstados: [
+      ...(pedido.historialEstados ?? []),
+      { estado: nuevoEstado, fecha: ahora },
+    ],
+  };
+
+  persistirAlmacen({ ...pedidosCache, [codigoNormalizado]: actualizado });
+
+  return respuesta(200, actualizado);
+}
+
+/**
+ * POST /v1/pedidos/:codigo/cancelar
+ *
+ * Solo admite órdenes en estado `recibido`. La reversión de stock es
+ * atómica: primero se repone el inventario y recién después se marca la
+ * orden como cancelada con su bitácora de estados.
+ */
+export async function cancelarPedido(
+  codigo: string,
+  motivo?: string
+): Promise<ApiResponse<Pedido | null>> {
+  await asegurarAlmacenListo();
+  await simularLatencia();
+
+  const codigoNormalizado = codigo.trim().toUpperCase();
+  const pedido = pedidosCache[codigoNormalizado];
+
+  if (!pedido) {
+    return respuesta(404, null);
+  }
+
+  if (pedido.cancelado || pedido.estado !== "recibido") {
+    return respuesta(409, pedido);
+  }
+
+  const ahora = new Date().toISOString();
+
+  // 1) Reversión atómica del stock de las variantes reservadas.
+  restaurarStockAtomico(pedido.items);
+
+  // 2) Marcado de cancelación + bitácora.
+  const actualizado: Pedido = {
+    ...pedido,
+    cancelado: true,
+    canceladoEn: ahora,
+    motivoCancelacion: motivo?.trim() || "Cancelado por cliente",
+    actualizadoEn: ahora,
+    historialEstados: [
+      ...(pedido.historialEstados ?? []),
+      { estado: "cancelado", fecha: ahora },
+    ],
   };
 
   persistirAlmacen({ ...pedidosCache, [codigoNormalizado]: actualizado });

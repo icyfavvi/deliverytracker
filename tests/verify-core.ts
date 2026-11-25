@@ -3,6 +3,7 @@ import {
   obtenerPedidoPorCodigo,
   crearPedido,
   avanzarEstado,
+  cancelarPedido,
   vaciarPedidos,
   detectarDuplicadoReciente,
 } from "../src/services/pedidosApi";
@@ -14,6 +15,8 @@ import {
   obtenerCatalogoConStock,
   obtenerStockPorSku,
   reponerStockSku,
+  resetearCatalogoBase,
+  restaurarStockAtomico,
 } from "../src/services/operacionesMock";
 import {
   ADMIN_DEMO,
@@ -340,6 +343,123 @@ async function runTests() {
   assert(
     esEstadoTerminal("entregado") && !esEstadoTerminal("listo"),
     "Estado 'entregado' detiene el polling como estado terminal"
+  );
+
+  // 10. Cancelación de orden en 'recibido' + reversión atómica de stock
+  console.log("\n10. Verificando cancelación de órdenes, stock y bitácora:");
+  const stockAntesCancelacion = obtenerStockPorSku("AN-HDY-L") ?? 0;
+  const resCancelable = await crearPedido(
+    "Camila Ríos",
+    "Irarrázaval 2820, Casa B",
+    "Ñuñoa",
+    [
+      {
+        sku: "AN-HDY-L",
+        nombre: "Noir Core Hoodie",
+        talla: "L",
+        cantidad: 2,
+        precioUnitario: 54990,
+      },
+    ],
+    "Courier Express 24h"
+  );
+  assert(resCancelable.status === 201, "Orden de prueba creada para cancelación");
+  assert(
+    resCancelable.data.historialEstados?.length === 1 &&
+      resCancelable.data.historialEstados?.[0].estado === "recibido",
+    "Bitácora inicial registra el estado 'recibido'"
+  );
+  assert(
+    obtenerStockPorSku("AN-HDY-L") === stockAntesCancelacion - 2,
+    "Stock descontado al crear la orden"
+  );
+
+  const resCancelar = await cancelarPedido(
+    resCancelable.data.codigo,
+    "Cancelado por cliente"
+  );
+  assert(
+    resCancelar.status === 200 && resCancelar.data?.cancelado === true,
+    "Cancelación en 'recibido' devuelve 200 y marca la orden"
+  );
+  assert(
+    resCancelar.data?.motivoCancelacion === "Cancelado por cliente",
+    "Motivo de cancelación persistido"
+  );
+  assert(
+    resCancelar.data?.historialEstados?.some((h) => h.estado === "cancelado") ===
+      true,
+    "Bitácora registra el estado 'cancelado'"
+  );
+  assert(
+    obtenerStockPorSku("AN-HDY-L") === stockAntesCancelacion,
+    "Stock revertido atómicamente tras la cancelación"
+  );
+
+  const resAvanzarCancelado = await avanzarEstado(resCancelable.data.codigo);
+  assert(
+    resAvanzarCancelado.status === 409,
+    "Orden cancelada no admite avance de estado (409)"
+  );
+
+  const resCancelarInexistente = await cancelarPedido("ZZZZ");
+  assert(
+    resCancelarInexistente.status === 404,
+    "Cancelar una orden inexistente devuelve 404"
+  );
+
+  const stockAntesTsh = obtenerStockPorSku("AN-TSH-M") ?? 0;
+  const resPreparando = await crearPedido(
+    "Diego Araya",
+    "Av. Apoquindo 4700",
+    "Las Condes",
+    [
+      {
+        sku: "AN-TSH-M",
+        nombre: "Signal Tee Cobalto",
+        talla: "M",
+        cantidad: 1,
+        precioUnitario: 29990,
+      },
+    ],
+    "Courier Express 24h"
+  );
+  await avanzarEstado(resPreparando.data.codigo);
+  const resCancelarPreparando = await cancelarPedido(
+    resPreparando.data.codigo
+  );
+  assert(
+    resCancelarPreparando.status === 409,
+    "No se puede cancelar una orden en 'preparando' (409)"
+  );
+  assert(
+    obtenerStockPorSku("AN-TSH-M") === stockAntesTsh - 1,
+    "El stock NO se revierte cuando la cancelación se rechaza (409)"
+  );
+
+  const pedidoCancelado = resCancelar.data;
+  const analiticaCancelada = calcularAnaliticaOperacion(
+    pedidoCancelado ? [pedidoCancelado] : [],
+    obtenerCatalogoConStock()
+  );
+  assert(
+    analiticaCancelada.total === 0 && analiticaCancelada.ventasNetas === 0,
+    "La analítica operativa excluye las órdenes canceladas"
+  );
+
+  // Restauración manual de stock: respeta el tope físico (stockInicial).
+  const stockTope = obtenerStockPorSku("AN-CAP-U") ?? 0;
+  restaurarStockAtomico([
+    { sku: "AN-CAP-U", nombre: "Studio Cap", cantidad: 999 },
+  ]);
+  assert(
+    obtenerStockPorSku("AN-CAP-U") === 12,
+    "restaurarStockAtomico nunca supera el stockInicial de la variante"
+  );
+  resetearCatalogoBase();
+  assert(
+    obtenerStockPorSku("AN-CAP-U") === stockTope,
+    "resetearCatalogoBase restituye el catálogo base"
   );
 
   await vaciarPedidos();

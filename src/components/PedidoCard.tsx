@@ -21,15 +21,25 @@ interface Props {
   pedido: Pedido;
   onAvanzarEstado: (codigo: string) => void;
   onCopiarCodigo?: (codigo: string) => void;
+  /** Habilita la cancelación de órdenes en estado `recibido`. */
+  onCancelarPedido?: (codigo: string) => void;
 }
 
-export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
+export function PedidoCard({
+  pedido,
+  onAvanzarEstado,
+  onCopiarCodigo,
+  onCancelarPedido,
+}: Props) {
   const { colores, tipografia, modo } = useTema();
   const indiceActual = FLUJO_ESTADOS.indexOf(pedido.estado);
   const esUltimoEstado = indiceActual === FLUJO_ESTADOS.length - 1;
   const siguienteEstado = esUltimoEstado
     ? null
     : FLUJO_ESTADOS[indiceActual + 1];
+  const cancelado = pedido.cancelado === true;
+  const puedeCancelar =
+    !cancelado && pedido.estado === "recibido" && Boolean(onCancelarPedido);
 
   const formatearPrecio = (valor: number) =>
     "$" + valor.toLocaleString("es-CL");
@@ -206,21 +216,59 @@ export function PedidoCard({ pedido, onAvanzarEstado, onCopiarCodigo }: Props) {
       </View>
 
       {/* Acción primaria */}
-      {!esUltimoEstado && siguienteEstado ? (
-        <Boton
-          etiqueta={`Avanzar a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
-          iconoDerecha="arrow-right"
-          onPress={() => onAvanzarEstado(pedido.codigo)}
+      {cancelado ? (
+        <View
           style={[
-            styles.botonAvanzar,
+            styles.selloCancelado,
             {
-              backgroundColor: fondoAvance,
+              backgroundColor: colores.errorSuave,
+              borderColor: colores.error,
               borderRadius: RADIOS.sm,
             },
           ]}
-          accessibilityLabel={`Avanzar pedido ${pedido.codigo} a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
-          accessibilityHint="Cambia el estado del despacho en el servidor"
-        />
+        >
+          <Icon name="circle-alert" size={16} color={colores.error} />
+          <Text style={[tipografia.etiqueta, { color: colores.error }]}>
+            Cancelado
+          </Text>
+          {pedido.motivoCancelacion ? (
+            <Text
+              style={[tipografia.caption, { color: colores.tintaSecundaria }]}
+              numberOfLines={1}
+            >
+              {pedido.motivoCancelacion}
+            </Text>
+          ) : null}
+        </View>
+      ) : !esUltimoEstado && siguienteEstado ? (
+        <View style={styles.acciones}>
+          <Boton
+            etiqueta={`Avanzar a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
+            iconoDerecha="arrow-right"
+            onPress={() => onAvanzarEstado(pedido.codigo)}
+            style={[
+              styles.botonAvanzar,
+              {
+                backgroundColor: fondoAvance,
+                borderRadius: RADIOS.sm,
+              },
+            ]}
+            accessibilityLabel={`Avanzar pedido ${pedido.codigo} a ${ETIQUETAS_ESTADO[siguienteEstado]}`}
+            accessibilityHint="Cambia el estado del despacho en el servidor"
+          />
+          {puedeCancelar ? (
+            <Boton
+              etiqueta="Cancelar"
+              icono="x"
+              variante="fantasma"
+              compacto
+              onPress={() => onCancelarPedido?.(pedido.codigo)}
+              style={styles.botonCancelar}
+              accessibilityLabel={`Cancelar pedido ${pedido.codigo}`}
+              accessibilityHint="Cancela la orden y devuelve las prendas al stock"
+            />
+          ) : null}
+        </View>
       ) : (
         <View
           style={[
@@ -330,7 +378,25 @@ const styles = StyleSheet.create({
     marginTop: ESPACIOS.xs,
   },
   botonAvanzar: {
+    width: "100%",
+  },
+  acciones: {
     marginTop: ESPACIOS.md,
+    gap: ESPACIOS.sm,
+  },
+  botonCancelar: {
+    alignSelf: "flex-start",
+  },
+  selloCancelado: {
+    marginTop: ESPACIOS.md,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: ESPACIOS.sm,
+    minHeight: 44,
+    paddingVertical: ESPACIOS.sm,
+    flexWrap: "wrap",
   },
   selloEntregado: {
     marginTop: ESPACIOS.md,

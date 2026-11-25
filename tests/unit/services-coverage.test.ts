@@ -25,11 +25,14 @@ import {
   obtenerCatalogoConStock,
   obtenerStockPorSku,
   reponerStockSku,
+  resetearCatalogoBase,
+  restaurarStockAtomico,
   simularBajaExternaStock,
   suscribirStock,
 } from "../../src/services/operacionesMock";
 import {
   avanzarEstado,
+  cancelarPedido,
   crearPedido,
   detectarDuplicadoReciente,
   obtenerPedidoPorCodigo,
@@ -133,6 +136,9 @@ describe("SQA Servicios y Utilidades (pedidosApi, operacionesMock, auth, polling
     expect(resCli.status).toBe(201);
     expect(resCli.data.totalEstimado).toBe(54_990);
     expect(obtenerStockPorSku("AN-HDY-S")).toBe(stockAntes - 1);
+    expect(resCli.data.historialEstados).toEqual([
+      { estado: "recibido", fecha: expect.any(String) },
+    ]);
 
     // Doble clic idempotente rechazado con 409
     const resDup = await crearPedido(
@@ -210,6 +216,15 @@ describe("SQA Servicios y Utilidades (pedidosApi, operacionesMock, auth, polling
     expect((await avanzarEstado(cod)).data?.estado).toBe("listo");
     expect((await avanzarEstado(cod)).data?.estado).toBe("entregado");
     expect((await avanzarEstado(cod)).status).toBe(409);
+
+    // La bitácora acumula cada avance con su marca de tiempo
+    const conHistorial = await obtenerPedidoPorCodigo(cod);
+    expect(conHistorial.data?.historialEstados?.map((h) => h.estado)).toEqual([
+      "recibido",
+      "preparando",
+      "listo",
+      "entregado",
+    ]);
 
     const todos = await obtenerPedidos();
     expect(todos.data.length).toBe(2);
@@ -502,6 +517,300 @@ describe("SQA Servicios y Utilidades (pedidosApi, operacionesMock, auth, polling
     } finally {
       Object.defineProperty(process, "versions", {
         value: origVersions,
+        configurable: true,
+      });
+    }
+  });
+
+  it("cancelarPedido revierte stock, sella la bitácora y rechaza órdenes no cancelables", async () => {
+    // 404 para códigos inexistentes
+    const res404 = await cancelarPedido("ZZZZ");
+    expect(res404.status).toBe(404);
+    expect(res404.ok).toBe(false);
+    expect(res404.data).toBeNull();
+
+    // Éxito en 'recibido' con reversión de stock
+    const stockAntes = obtenerStockPorSku("AN-CRG-32") ?? 0;
+    const creada = await crearPedido(
+      "Camila Ríos",
+      "Irarrázaval 2820",
+      "Ñuñoa",
+      [
+        {
+          sku: "AN-CRG-32",
+          nombre: "Cargo 02 — Ash",
+          talla: "32",
+          cantidad: 2,
+          precioUnitario: 64_990,
+        },
+      ],
+      "Courier Express 24h"
+    );
+    expect(creada.status).toBe(201);
+    expect(obtenerStockPorSku("AN-CRG-32")).toBe(stockAntes - 2);
+
+    const cancelada = await cancelarPedido(
+      creada.data.codigo,
+      "Cancelado por cliente"
+    );
+    expect(cancelada.status).toBe(200);
+    expect(cancelada.ok).toBe(true);
+    expect(cancelada.data?.cancelado).toBe(true);
+    expect(cancelada.data?.canceladoEn).toEqual(expect.any(String));
+    expect(cancelada.data?.actualizadoEn).toEqual(expect.any(String));
+    expect(cancelada.data?.motivoCancelacion).toBe("Cancelado por cliente");
+    expect(cancelada.data?.historialEstados?.map((h) => h.estado)).toEqual([
+      "recibido",
+      "cancelado",
+    ]);
+    expect(obtenerStockPorSku("AN-CRG-32")).toBe(stockAntes);
+
+    // 409 al reintentar la cancelación de la misma orden
+    const repetida = await cancelarPedido(creada.data.codigo);
+    expect(repetida.status).toBe(409);
+    expect(repetida.data?.cancelado).toBe(true);
+
+    // 409 al avanzar una orden cancelada (terminal)
+    const avance = await avanzarEstado(creada.data.codigo);
+    expect(avance.status).toBe(409);
+
+    // 409 al cancelar una orden que ya avanzó de estado
+    const segunda = await crearPedido(
+      "Diego Araya",
+      "Av. Apoquindo 4700",
+      "Las Condes",
+      [
+        {
+          sku: "AN-BMB-L",
+          nombre: "Bomber Nylon Tech",
+          talla: "L",
+          cantidad: 1,
+          precioUnitario: 79_990,
+        },
+      ]
+    );
+    await avanzarEstado(segunda.data.codigo);
+    const rechazada = await cancelarPedido(segunda.data.codigo);
+    expect(rechazada.status).toBe(409);
+    expect(rechazada.data?.cancelado).toBeUndefined();
+
+    // La analítica operativa ignora las órdenes canceladas
+    const avanzado = await obtenerPedidoPorCodigo(segunda.data.codigo);
+    const pedidosOperativos = [cancelada.data, avanzado.data].filter(
+      (p): p is NonNullable<typeof p> => p !== null
+    );
+    const analitica = calcularAnaliticaOperacion(
+      pedidosOperativos,
+      obtenerCatalogoConStock()
+    );
+    expect(analitica.total).toBe(1);
+    expect(analitica.ventasNetas).toBe(segunda.data.totalEstimado);
+    expect(analitica.porEstado.recibido).toBe(0);
+    expect(analitica.porEstado.preparando).toBe(1);
+
+    // Motivo por defecto cuando el cliente no informa uno
+    const tercera = await crearPedido(
+      "Martina Soto",
+      "Av. Providencia 1450",
+      "Providencia",
+      [
+        {
+          sku: "AN-TSH-L",
+          nombre: "Signal Tee Cobalto",
+          talla: "L",
+          cantidad: 1,
+          precioUnitario: 29_990,
+        },
+      ]
+    );
+    const cancelDefecto = await cancelarPedido(tercera.data.codigo, "   ");
+    expect(cancelDefecto.status).toBe(200);
+    expect(cancelDefecto.data?.motivoCancelacion).toBe("Cancelado por cliente");
+  });
+
+  it("restaurarStockAtomico repone dentro del tope físico y resetearCatalogoBase restaura el catálogo", () => {
+    const stockBase = obtenerStockPorSku("AN-CAP-U") ?? 0;
+
+    // Ítems sin SKU, con cantidad inválida o SKU inexistente no tocan stock
+    restaurarStockAtomico([{ nombre: "Sin SKU", cantidad: 3 }]);
+    restaurarStockAtomico([
+      { sku: "AN-CAP-U", nombre: "Studio Cap", cantidad: 0 },
+    ]);
+    restaurarStockAtomico([
+      { sku: "SKU-inexistente", nombre: "X", cantidad: 2 },
+    ]);
+    expect(obtenerStockPorSku("AN-CAP-U")).toBe(stockBase);
+
+    // La reposición nunca supera el stockInicial de la variante (12 u.)
+    restaurarStockAtomico([
+      { sku: "AN-CAP-U", nombre: "Studio Cap", cantidad: 99 },
+    ]);
+    expect(obtenerStockPorSku("AN-CAP-U")).toBe(12);
+
+    resetearCatalogoBase();
+    expect(obtenerStockPorSku("AN-CAP-U")).toBe(stockBase);
+  });
+
+  it("operacionesMock persiste el inventario de SKUs en Web (sync multi-pestaña) y lo hidrata en nativo", async () => {
+    const winRef = (globalThis as unknown as { window?: Record<string, unknown> })
+      .window;
+    const origLocalStorage = winRef?.localStorage;
+    const origAddEvent = winRef?.addEventListener;
+    const webStore = new Map<string, string>();
+    const storageMock = {
+      getItem: jest.fn((k: string) => webStore.get(k) ?? null),
+      setItem: jest.fn((k: string, v: string) => {
+        webStore.set(k, v);
+      }),
+      removeItem: jest.fn((k: string) => {
+        webStore.delete(k);
+      }),
+    };
+    const storageHandlers: ((
+      e: { key: string; newValue: string | null }
+    ) => void)[] = [];
+
+    // Snapshot dejado por "otra pestaña": AN-HDY-M quedó en 5 unidades.
+    webStore.set(
+      "deliverytracker_stock_v1",
+      JSON.stringify({ "AN-HDY-M": { stock: 5, stockInicial: 10 } })
+    );
+
+    Object.defineProperty(globalThis, "window", {
+      value: {
+        ...(winRef ?? {}),
+        localStorage: storageMock,
+        addEventListener: jest.fn(
+          (
+            ev: string,
+            cb: (e: { key: string; newValue: string | null }) => void
+          ) => {
+            if (ev === "storage") storageHandlers.push(cb);
+          }
+        ),
+      },
+      configurable: true,
+    });
+
+    try {
+      await jest.isolateModulesAsync(async () => {
+        const ops = require("../../src/services/operacionesMock") as typeof import("../../src/services/operacionesMock");
+
+        // Hidratación síncrona desde localStorage
+        expect(ops.obtenerStockPorSku("AN-HDY-M")).toBe(5);
+
+        // Toda mutación persiste el inventario
+        ops.reponerStockSku("AN-HDY-M", 2);
+        expect(storageMock.setItem).toHaveBeenCalledWith(
+          "deliverytracker_stock_v1",
+          expect.any(String)
+        );
+        const snapshotWeb = JSON.parse(
+          webStore.get("deliverytracker_stock_v1") ?? "{}"
+        );
+        expect(snapshotWeb["AN-HDY-M"].stock).toBe(7);
+
+        // Evento `storage`: sincroniza el stock de otra pestaña
+        const listener = jest.fn();
+        ops.suscribirStock(listener);
+        storageHandlers.forEach((h) => h({ key: "otra_clave", newValue: null }));
+        expect(listener).not.toHaveBeenCalled();
+        storageHandlers.forEach((h) =>
+          h({
+            key: "deliverytracker_stock_v1",
+            newValue: JSON.stringify({
+              "AN-HDY-M": { stock: 1, stockInicial: 10 },
+            }),
+          })
+        );
+        expect(ops.obtenerStockPorSku("AN-HDY-M")).toBe(1);
+        expect(listener).toHaveBeenCalled();
+
+        // Evento con payload corrupto: el stock local no se rompe
+        storageHandlers.forEach((h) =>
+          h({ key: "deliverytracker_stock_v1", newValue: "{roto" })
+        );
+        expect(ops.obtenerStockPorSku("AN-HDY-M")).toBe(1);
+
+        // Snapshot con stock inválido se descarta sin romper el catálogo
+        storageHandlers.forEach((h) =>
+          h({
+            key: "deliverytracker_stock_v1",
+            newValue: JSON.stringify({
+              "AN-HDY-M": { stock: "cinco", stockInicial: 10 },
+            }),
+          })
+        );
+        expect(ops.obtenerStockPorSku("AN-HDY-M")).toBe(1);
+
+        // Hidratación explícita (misma ruta de lectura Web)
+        await ops.asegurarStockHidratado();
+        expect(ops.obtenerStockPorSku("AN-HDY-M")).toBe(7);
+
+        // Reset: borra el inventario persistido y restaura el catálogo base
+        ops.resetearCatalogoBase();
+        expect(storageMock.removeItem).toHaveBeenCalledWith(
+          "deliverytracker_stock_v1"
+        );
+        expect(ops.obtenerStockPorSku("AN-HDY-M")).toBe(4);
+      });
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        value: {
+          ...(winRef ?? {}),
+          localStorage: origLocalStorage,
+          addEventListener: origAddEvent,
+        },
+        configurable: true,
+      });
+    }
+
+    // ── Modo nativo (AsyncStorage, sin localStorage ni Node) ─────
+    const origVersions = process.versions;
+    Object.defineProperty(process, "versions", {
+      value: {},
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "window", {
+      value: { localStorage: undefined },
+      configurable: true,
+    });
+    try {
+      await AsyncStorage.setItem(
+        "deliverytracker_stock_v1",
+        JSON.stringify({ "AN-HDY-S": { stock: 2, stockInicial: 10 } })
+      );
+
+      await jest.isolateModulesAsync(async () => {
+        const ops = require("../../src/services/operacionesMock") as typeof import("../../src/services/operacionesMock");
+        await ops.asegurarStockHidratado();
+        expect(ops.obtenerStockPorSku("AN-HDY-S")).toBe(2);
+
+        // La reposición persiste en AsyncStorage
+        ops.reponerStockSku("AN-HDY-S", 3);
+        const snapshotNat = await AsyncStorage.getItem(
+          "deliverytracker_stock_v1"
+        );
+        expect(snapshotNat).toContain("AN-HDY-S");
+        expect(JSON.parse(snapshotNat ?? "{}")["AN-HDY-S"].stock).toBe(5);
+
+        // Reset nativo: borra la clave persistida y restaura el catálogo
+        ops.resetearCatalogoBase();
+        expect(ops.obtenerStockPorSku("AN-HDY-S")).toBe(7);
+      });
+
+      await AsyncStorage.clear();
+    } finally {
+      Object.defineProperty(process, "versions", {
+        value: origVersions,
+        configurable: true,
+      });
+      Object.defineProperty(globalThis, "window", {
+        value: {
+          ...(winRef ?? {}),
+          localStorage: origLocalStorage,
+          addEventListener: origAddEvent,
+        },
         configurable: true,
       });
     }

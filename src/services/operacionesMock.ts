@@ -4,6 +4,8 @@
 // clientes, descuento atómico de stock, reposición en bodega y agregación
 // analítica O(P + V) para las vistas del portal Admin y Cliente.
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import {
   AnaliticaOperacion,
   ClienteAdmin,
@@ -228,6 +230,193 @@ export function suscribirStock(listener: StockListener): () => void {
   };
 }
 
+// ─── Persistencia del inventario de SKUs (Web + Nativo) ────────────
+//
+// El stock por SKU sobrevive al cierre de la app y se sincroniza entre
+// pestañas Web mediante el evento `storage`. En Node (pruebas con `tsx`)
+// no existe almacenamiento: todo queda en memoria.
+
+export const STOCK_STORAGE_KEY = "deliverytracker_stock_v1";
+
+interface SnapshotVariante {
+  stock: number;
+  stockInicial: number;
+}
+
+function tieneLocalStorageWeb(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.localStorage !== "undefined" &&
+    window.localStorage !== null
+  );
+}
+
+function usarAsyncStorageNativo(): boolean {
+  const esNode =
+    typeof process !== "undefined" && Boolean(process.versions?.node);
+  return !tieneLocalStorageWeb() && !esNode;
+}
+
+function serializarStock(): Record<string, SnapshotVariante> {
+  const mapa: Record<string, SnapshotVariante> = {};
+  for (const prod of catalogoStock) {
+    for (const v of prod.variantes) {
+      mapa[v.sku] = { stock: v.stock, stockInicial: v.stockInicial };
+    }
+  }
+  return mapa;
+}
+
+/** Aplica un snapshot de stock sobre el catálogo en memoria (O(V)). */
+function aplicarStockPersistido(
+  mapa: Record<string, SnapshotVariante>
+): boolean {
+  if (!mapa || typeof mapa !== "object") return false;
+  let aplico = false;
+  for (const prod of catalogoStock) {
+    for (const v of prod.variantes) {
+      const guardado = mapa[v.sku];
+      if (!guardado || typeof guardado !== "object") continue;
+      const stock = guardado.stock;
+      if (typeof stock !== "number" || !Number.isFinite(stock) || stock < 0) {
+        continue;
+      }
+      v.stock = Math.floor(stock);
+      if (
+        typeof guardado.stockInicial === "number" &&
+        Number.isFinite(guardado.stockInicial) &&
+        guardado.stockInicial >= v.stock
+      ) {
+        v.stockInicial = Math.floor(guardado.stockInicial);
+      }
+      aplico = true;
+    }
+  }
+  return aplico;
+}
+
+function persistirStock(): void {
+  const payload = JSON.stringify(serializarStock());
+  if (tieneLocalStorageWeb()) {
+    try {
+      window.localStorage.setItem(STOCK_STORAGE_KEY, payload);
+    } catch {
+      // Almacenamiento bloqueado o lleno: el stock sigue válido en memoria.
+    }
+    return;
+  }
+  if (usarAsyncStorageNativo()) {
+    AsyncStorage.setItem(STOCK_STORAGE_KEY, payload).catch(() => {
+      // Persistencia best-effort en nativo.
+    });
+  }
+}
+
+async function leerStockPersistido(): Promise<string | null> {
+  try {
+    if (tieneLocalStorageWeb()) {
+      return window.localStorage.getItem(STOCK_STORAGE_KEY);
+    }
+    if (usarAsyncStorageNativo()) {
+      return await AsyncStorage.getItem(STOCK_STORAGE_KEY);
+    }
+  } catch {
+    // Lectura fallida: se conserva el catálogo base.
+  }
+  return null;
+}
+
+let promesaStockHidratacion: Promise<void> | null = null;
+
+/** Hidrata el stock persistido (idempotente) y notifica a la UI. */
+export function asegurarStockHidratado(): Promise<void> {
+  if (!promesaStockHidratacion) {
+    promesaStockHidratacion = (async () => {
+      const raw = await leerStockPersistido();
+      if (!raw) return;
+      try {
+        const mapa = JSON.parse(raw) as Record<string, SnapshotVariante>;
+        if (aplicarStockPersistido(mapa)) emitirCambioStock();
+      } catch {
+        // Snapshot corrupto: se ignora y sigue el catálogo base.
+      }
+    })();
+  }
+  return promesaStockHidratacion;
+}
+
+/**
+ * Restaura el stock de los ítems de una orden cancelada en O(k) usando el
+ * índice SKU. Nunca supera `stockInicial` (tope físico de la variante).
+ */
+export function restaurarStockAtomico(items: ItemPedido[]): void {
+  let toco = false;
+  for (const item of items) {
+    if (!item.sku || item.cantidad <= 0) continue;
+    const ref = skuIndice[item.sku];
+    if (!ref) continue;
+    const variante = catalogoStock[ref.prodIdx].variantes[ref.varIdx];
+    const disponible = Math.max(0, variante.stockInicial - variante.stock);
+    const aReponer = Math.min(item.cantidad, disponible);
+    variante.stock += aReponer;
+    toco = true;
+  }
+  if (!toco) return;
+  persistirStock();
+  emitirCambioStock();
+}
+
+/** Restablece el catálogo base y limpia el inventario persistido. */
+export function resetearCatalogoBase(): void {
+  catalogoStock = JSON.parse(JSON.stringify(CATALOGO_BASE));
+  reconstruirIndiceSku();
+
+  if (tieneLocalStorageWeb()) {
+    try {
+      window.localStorage.removeItem(STOCK_STORAGE_KEY);
+    } catch {
+      // Sin acceso al almacenamiento: el reset solo afecta a memoria.
+    }
+  } else if (usarAsyncStorageNativo()) {
+    AsyncStorage.removeItem(STOCK_STORAGE_KEY).catch(() => {
+      // Persistencia best-effort en nativo.
+    });
+  }
+  emitirCambioStock();
+}
+
+// Hidratación síncrona en Web + sincronización entre pestañas.
+if (tieneLocalStorageWeb()) {
+  try {
+    const raw = window.localStorage.getItem(STOCK_STORAGE_KEY);
+    if (raw) {
+      aplicarStockPersistido(
+        JSON.parse(raw) as Record<string, SnapshotVariante>
+      );
+    }
+  } catch {
+    // Snapshot corrupto: se ignora y sigue el catálogo base.
+  }
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("storage", (e) => {
+      if (e.key !== STOCK_STORAGE_KEY) return;
+      try {
+        const nuevo = e.newValue;
+        if (nuevo) {
+          aplicarStockPersistido(
+            JSON.parse(nuevo) as Record<string, SnapshotVariante>
+          );
+        }
+      } catch {
+        // Evento con payload corrupto: se mantiene el stock local.
+      }
+      emitirCambioStock();
+    });
+  }
+} else {
+  void asegurarStockHidratado();
+}
+
 export function obtenerCatalogoConStock(): ProductoCatalogoAdmin[] {
   return catalogoStock.map((p) => ({
     ...p,
@@ -286,6 +475,7 @@ export function validarYDescontarStockAtomico(items: ItemPedido[]): {
     const variante = catalogoStock[ref.prodIdx].variantes[ref.varIdx];
     variante.stock = Math.max(0, variante.stock - item.cantidad);
   }
+  persistirStock();
   emitirCambioStock();
   return { ok: true, conflictos: [] };
 }
@@ -298,6 +488,7 @@ export function reponerStockSku(sku: string, cantidad: number): number | null {
   if (variante.stock > variante.stockInicial) {
     variante.stockInicial = variante.stock;
   }
+  persistirStock();
   emitirCambioStock();
   return variante.stock;
 }
@@ -307,6 +498,7 @@ export function simularBajaExternaStock(sku: string): number | null {
   if (!ref) return null;
   const variante = catalogoStock[ref.prodIdx].variantes[ref.varIdx];
   variante.stock = Math.max(0, variante.stock - 1);
+  persistirStock();
   emitirCambioStock();
   return variante.stock;
 }
@@ -388,8 +580,12 @@ export function calcularAnaliticaOperacion(
 
   let ventasNetas = 0;
   let totalUnidadesVendidas = 0;
+  let pedidosOperativos = 0;
 
   for (const p of pedidos) {
+    // Las órdenes canceladas no distorsionan ventas, activos ni mix operativo.
+    if (p.cancelado) continue;
+    pedidosOperativos += 1;
     porEstado[p.estado] += 1;
     ventasNetas += p.totalEstimado ?? 0;
 
@@ -405,7 +601,7 @@ export function calcularAnaliticaOperacion(
     }
   }
 
-  const total = pedidos.length;
+  const total = pedidosOperativos;
   const entregados = porEstado.entregado;
   const activos = total - entregados;
   const ticketPromedio = total > 0 ? Math.round(ventasNetas / total) : 0;

@@ -16,6 +16,7 @@ import React, {
 
 import {
   avanzarEstado,
+  cancelarPedido,
   ConflictoStock,
   crearPedido,
   obtenerPedidos,
@@ -69,6 +70,7 @@ interface ValorPedidos {
     opciones?: CrearPedidoOpciones
   ) => Promise<ResultadoAccion>;
   avanzar: (codigo: string) => Promise<ResultadoAccion>;
+  cancelar: (codigo: string, motivo?: string) => Promise<ResultadoAccion>;
   reponerStock: (sku: string, cantidad: number) => number | null;
 }
 
@@ -230,6 +232,33 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
     [recargar]
   );
 
+  const cancelar = useCallback(
+    async (codigo: string, motivo?: string): Promise<ResultadoAccion> => {
+      try {
+        omitirSiguienteEventoRef.current = true;
+        const res = await cancelarPedido(codigo, motivo);
+        if (!res.ok) {
+          omitirSiguienteEventoRef.current = false;
+          return {
+            ok: false,
+            mensaje:
+              res.status === 404
+                ? `No encontramos la orden ${codigo}.`
+                : res.status === 409
+                  ? "Solo puedes cancelar órdenes en estado 'Confirmado'."
+                  : `No se pudo cancelar la orden ${codigo} (${res.status}).`,
+          };
+        }
+        await recargar();
+        return { ok: true, codigo: res.data?.codigo, pedido: res.data ?? undefined };
+      } catch {
+        omitirSiguienteEventoRef.current = false;
+        return { ok: false, mensaje: "Error de red al cancelar la orden." };
+      }
+    },
+    [recargar]
+  );
+
   const reponerStock = useCallback((sku: string, cantidad: number) => {
     return reponerStockSku(sku, cantidad);
   }, []);
@@ -265,6 +294,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       recargar,
       crearOrden,
       avanzar,
+      cancelar,
       reponerStock,
     }),
     [
@@ -278,6 +308,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
       recargar,
       crearOrden,
       avanzar,
+      cancelar,
       reponerStock,
     ]
   );

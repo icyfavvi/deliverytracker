@@ -21,6 +21,10 @@ interface Props {
   producto: ProductoCatalogoAdmin;
   onAgregar?: (producto: ProductoCatalogoAdmin) => void;
   etiquetaAccion?: string;
+  /** SKU (o etiqueta de talla) de la variante elegida por el usuario. */
+  tallaSeleccionada?: string;
+  /** Permite elegir talla antes de añadir al carrito. */
+  onSeleccionarTalla?: (sku: string) => void;
 }
 
 const PALETA_TONO: Record<
@@ -57,6 +61,8 @@ export function ProductoCatalogoCard({
   producto,
   onAgregar,
   etiquetaAccion = "Añadir",
+  tallaSeleccionada,
+  onSeleccionarTalla,
 }: Props) {
   const { colores, tipografia, modo, puntoMinimo } = useTema();
   const tono = PALETA_TONO[producto.tono];
@@ -64,6 +70,8 @@ export function ProductoCatalogoCard({
   const stockTotal = producto.variantes.reduce((sum, v) => sum + v.stock, 0);
   const agotado = stockTotal === 0;
   const esCritico = stockTotal > 0 && stockTotal <= STOCK_CRITICO_MAX;
+  const variantePorDefecto =
+    producto.variantes.find((v) => v.stock > 0) ?? producto.variantes[0];
 
   const formatearPrecio = (val: number) => "$" + val.toLocaleString("es-CL");
 
@@ -107,6 +115,64 @@ export function ProductoCatalogoCard({
           {formatearPrecio(producto.precio)}
         </Text>
       </View>
+
+      {/* Selector de talla (chips accesibles >= 44pt) */}
+      {onSeleccionarTalla ? (
+        <View style={styles.tallaBloque}>
+          <Text
+            style={[tipografia.micro, { color: colores.tintaTerciaria }]}
+          >
+            TALLA
+          </Text>
+          <View style={styles.tallaChips}>
+            {producto.variantes.map((v) => {
+              const sinStock = v.stock <= 0;
+              const activa = tallaSeleccionada
+                ? tallaSeleccionada === v.sku || tallaSeleccionada === v.talla
+                : variantePorDefecto?.sku === v.sku;
+              return (
+                <Pressable
+                  key={v.sku}
+                  onPress={() => onSeleccionarTalla(v.sku)}
+                  disabled={sinStock}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Talla ${v.talla} de ${producto.nombre}`}
+                  accessibilityState={{ selected: activa, disabled: sinStock }}
+                  aria-selected={activa}
+                  aria-disabled={sinStock}
+                  style={({ pressed }) => [
+                    styles.chipTalla,
+                    {
+                      minWidth: puntoMinimo,
+                      minHeight: puntoMinimo,
+                      borderRadius: RADIOS.pill,
+                      backgroundColor: activa
+                        ? colores.acentoSuave
+                        : colores.superficieHundida,
+                      borderColor: activa ? colores.acento : colores.borde,
+                      opacity: sinStock ? 0.45 : pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      tipografia.caption,
+                      {
+                        color: activa
+                          ? colores.acentoIntenso
+                          : colores.tintaSecundaria,
+                        fontFamily: activa ? FUENTES.semi : FUENTES.medio,
+                      },
+                    ]}
+                  >
+                    {v.talla}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       {/* Acción + stock en vivo */}
       <View style={styles.pie}>
@@ -215,6 +281,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 5,
     paddingHorizontal: ESPACIOS.md,
+    cursor: "pointer",
+  },
+  tallaBloque: {
+    gap: ESPACIOS.xs + 2,
+  },
+  tallaChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: ESPACIOS.sm,
+  },
+  chipTalla: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    paddingHorizontal: ESPACIOS.sm + 2,
     cursor: "pointer",
   },
 });

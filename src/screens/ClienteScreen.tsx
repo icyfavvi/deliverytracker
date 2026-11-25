@@ -77,13 +77,29 @@ function formatearCLP(valor: number): string {
   return "$" + Math.round(valor).toLocaleString("es-CL");
 }
 
+/** Etiqueta legible de una entrada de la bitácora de estados. */
+function etiquetaEstadoHistorial(estado: string): string {
+  if (estado === "cancelado") return "Cancelado";
+  return ETIQUETAS_ESTADO[estado as EstadoPedido] ?? estado;
+}
+
+/** Hora local es-CL (HH:MM) de una marca de tiempo ISO. */
+function formatearHoraHistorial(fecha: string): string {
+  const instante = new Date(fecha);
+  if (Number.isNaN(instante.getTime())) return "--:--";
+  return instante.toLocaleTimeString("es-CL", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function ClienteScreen() {
   const { codigo: codigoParam } = useLocalSearchParams<{ codigo?: string }>();
   const { width } = useWindowDimensions();
   const esAncho = width >= BREAKPOINTS.tablet;
   const { colores, tipografia, modo, puntoMinimo } = useTema();
   const reducirMovimiento = useReducirMovimiento();
-  const { pedidos, catalogo, analitica, crearOrden } = usePedidos();
+  const { pedidos, catalogo, analitica, crearOrden, cancelar } = usePedidos();
 
   const [vista, setVista] = useState<VistaCliente>("seguimiento");
   const [busquedaGlobal, setBusquedaGlobal] = useState("");
@@ -131,12 +147,18 @@ export function ClienteScreen() {
   const [modalCompraAbierto, setModalCompraAbierto] = useState(false);
   const [nombreCompra, setNombreCompra] = useState(NOMBRE_CLIENTE_DEFAULT);
   const [errorNombreCompra, setErrorNombreCompra] = useState<string | null>(null);
+  const [errorCarrito, setErrorCarrito] = useState<string | null>(null);
   const [dirCompra, setDirCompra] = useState("Av. Providencia 1450, Dpto 802");
   const [comunaCompra, setComunaCompra] = useState<string>(COMUNAS_RM[0]);
   const [idempotencyCompra, setIdempotencyCompra] = useState(() =>
     generarIdempotencyCliente()
   );
   const [creandoCompra, setCreandoCompra] = useState(false);
+  // Talla elegida por producto (por defecto: primera variante con stock).
+  const [tallaPorProducto, setTallaPorProducto] = useState<Record<string, string>>(
+    {}
+  );
+  const [cancelando, setCancelando] = useState(false);
 
   const registrarCodigoPropio = useCallback((codigo: string) => {
     const norm = codigo.trim().toUpperCase();
@@ -349,8 +371,14 @@ export function ClienteScreen() {
 
   const agregarAlCarritoCliente = useCallback(
     (prod: ProductoCatalogoAdmin) => {
-      const varDisp = prod.variantes.find((v) => v.stock > 0);
-      if (!varDisp) return;
+      const elegida = tallaPorProducto[prod.id];
+      const varDisp =
+        (elegida
+          ? prod.variantes.find(
+              (v) => v.sku === elegida || v.talla === elegida
+            )
+          : undefined) ?? prod.variantes.find((v) => v.stock > 0);
+      if (!varDisp || varDisp.stock <= 0) return;
 
       setCarrito((prev) => {
         const idx = prev.findIndex((i) => i.sku === varDisp.sku);
@@ -373,9 +401,93 @@ export function ClienteScreen() {
         ];
       });
       setErrorNombreCompra(null);
+      setErrorCarrito(null);
       setModalCompraAbierto(true);
     },
+    [tallaPorProducto]
+  );
+
+  const seleccionarTallaProducto = useCallback(
+    (prod: ProductoCatalogoAdmin, sku: string) => {
+      setTallaPorProducto((prev) => ({ ...prev, [prod.id]: sku }));
+    },
     []
+  );
+
+  // Talla vigente: la elegida o, por defecto, la primera con stock.
+  const tallaSeleccionadaDe = useCallback(
+    (prod: ProductoCatalogoAdmin) => {
+      const elegida = tallaPorProducto[prod.id];
+      if (elegida) return elegida;
+      return prod.variantes.find((v) => v.stock > 0)?.sku;
+    },
+    [tallaPorProducto]
+  );
+
+  // Stock vivo por SKU (respetado al editar el carrito).
+  const stockPorSku = useMemo(() => {
+    const mapa: Record<string, number> = {};
+    for (const prod of catalogo) {
+      for (const v of prod.variantes) {
+        mapa[v.sku] = v.stock;
+      }
+    }
+    return mapa;
+  }, [catalogo]);
+
+  const cambiarCantidadCarrito = useCallback(
+    (item: ItemPedido, delta: number) => {
+      const maximo = item.sku ? (stockPorSku[item.sku] ?? item.cantidad) : item.cantidad;
+      if (delta > 0 && item.cantidad + delta > maximo) {
+        setErrorCarrito(
+          `Stock disponible para ${item.nombre}: ${maximo} un.`
+        );
+        return;
+      }
+      setErrorCarrito(null);
+      setCarrito((prev) =>
+        prev.map((it) =>
+          (it.sku ?? it.nombre) === (item.sku ?? item.nombre)
+            ? { ...it, cantidad: Math.max(1, it.cantidad + delta) }
+            : it
+        )
+      );
+    },
+    [stockPorSku]
+  );
+
+  const quitarItemCarrito = useCallback((item: ItemPedido) => {
+    setErrorCarrito(null);
+    setCarrito((prev) =>
+      prev.filter((it) => (it.sku ?? it.nombre) !== (item.sku ?? item.nombre))
+    );
+  }, []);
+
+  const handleCancelarPedido = useCallback(
+    async (codigo: string) => {
+      if (cancelando) return;
+      setCancelando(true);
+      try {
+        const resultado = await cancelar(codigo, "Cancelado por cliente");
+        if (!resultado.ok) {
+          setAviso({
+            titulo: "No se pudo cancelar el pedido",
+            mensaje: resultado.mensaje ?? "Intenta nuevamente.",
+            tono: "error",
+          });
+          return;
+        }
+        setAviso({
+          titulo: `Pedido #${codigo} cancelado`,
+          mensaje: "Devolvimos las prendas al stock de bodega.",
+          tono: "exito",
+        });
+        await consultarPedido();
+      } finally {
+        setCancelando(false);
+      }
+    },
+    [cancelando, cancelar, consultarPedido]
   );
 
   const confirmarPedidoCliente = async () => {
@@ -769,7 +881,7 @@ export function ClienteScreen() {
                         { color: colores.tintaSecundaria },
                       ]}
                     >
-                      {ETIQUETAS_ESTADO[p.estado]}
+                      {p.cancelado ? "Cancelado" : ETIQUETAS_ESTADO[p.estado]}
                     </Text>
                   </View>
                   <Text style={[tipografia.micro, { color: colores.tinta }]}>
@@ -816,6 +928,8 @@ export function ClienteScreen() {
               <ProductoCatalogoCard
                 producto={prod}
                 onAgregar={agregarAlCarritoCliente}
+                tallaSeleccionada={tallaSeleccionadaDe(prod)}
+                onSeleccionarTalla={(sku) => seleccionarTallaProducto(prod, sku)}
               />
             </View>
           ))}
@@ -1016,6 +1130,8 @@ export function ClienteScreen() {
               <ProductoCatalogoCard
                 producto={prod}
                 onAgregar={agregarAlCarritoCliente}
+                tallaSeleccionada={tallaSeleccionadaDe(prod)}
+                onSeleccionarTalla={(sku) => seleccionarTallaProducto(prod, sku)}
               />
             </View>
           ))}
@@ -1242,22 +1358,94 @@ export function ClienteScreen() {
                 <EstadoPedidoBadge estado={pedido.estado} />
               </View>
 
-              <View
-                style={[
-                  styles.cajaEstado,
-                  {
-                    backgroundColor: colores.estadoSuave[pedido.estado],
-                    borderColor: colores.borde,
-                    borderRadius: RADIOS.md,
-                  },
-                ]}
-              >
-                <Text style={[tipografia.cuerpo, { color: colores.tinta }]}>
-                  {DESCRIPCIONES_ESTADO[pedido.estado]}
-                </Text>
-              </View>
+              {pedido.cancelado ? (
+                <View
+                  style={[
+                    styles.cajaEstado,
+                    {
+                      backgroundColor: colores.errorSuave,
+                      borderColor: colores.error,
+                      borderRadius: RADIOS.md,
+                    },
+                  ]}
+                >
+                  <View style={styles.pillCancelado}>
+                    <Icon name="circle-alert" size={16} color={colores.error} />
+                    <Text
+                      style={[tipografia.etiqueta, { color: colores.error }]}
+                    >
+                      Orden cancelada
+                    </Text>
+                  </View>
+                  <Text
+                    style={[tipografia.caption, { color: colores.tinta }]}
+                  >
+                    {pedido.motivoCancelacion ??
+                      "La orden fue cancelada y las prendas volvieron al stock de bodega."}
+                  </Text>
+                </View>
+              ) : (
+                <View
+                  style={[
+                    styles.cajaEstado,
+                    {
+                      backgroundColor: colores.estadoSuave[pedido.estado],
+                      borderColor: colores.borde,
+                      borderRadius: RADIOS.md,
+                    },
+                  ]}
+                >
+                  <Text style={[tipografia.cuerpo, { color: colores.tinta }]}>
+                    {DESCRIPCIONES_ESTADO[pedido.estado]}
+                  </Text>
+                </View>
+              )}
+
+              {pedido.estado === "recibido" && !pedido.cancelado ? (
+                <Boton
+                  etiqueta="Cancelar pedido"
+                  icono="x"
+                  variante="secundario"
+                  onPress={() => handleCancelarPedido(pedido.codigo)}
+                  deshabilitado={cancelando}
+                  style={styles.botonCancelarPedido}
+                  accessibilityLabel="Cancelar pedido"
+                  accessibilityHint="Cancela la orden y devuelve las prendas al stock"
+                />
+              ) : null}
 
               <StepperProgreso estado={pedido.estado} />
+
+              {/* Bitácora de estados */}
+              {pedido.historialEstados && pedido.historialEstados.length > 0 ? (
+                <View style={styles.historialEstados}>
+                  <Text
+                    style={[tipografia.micro, { color: colores.tintaTerciaria }]}
+                  >
+                    HISTORIAL
+                  </Text>
+                  {pedido.historialEstados.map((h, idx) => (
+                    <View
+                      key={`${h.estado}-${idx}`}
+                      style={styles.historialFila}
+                    >
+                      <Text
+                        style={[tipografia.caption, { color: colores.tinta }]}
+                      >
+                        {etiquetaEstadoHistorial(h.estado)}
+                      </Text>
+                      <Text
+                        style={[
+                          tipografia.micro,
+                          { color: colores.tintaTerciaria },
+                        ]}
+                      >
+                        {formatearHoraHistorial(h.fecha)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
 
               {/* Prendas */}
               <View
@@ -1503,6 +1691,8 @@ export function ClienteScreen() {
               <ProductoCatalogoCard
                 producto={prod}
                 onAgregar={agregarAlCarritoCliente}
+                tallaSeleccionada={tallaSeleccionadaDe(prod)}
+                onSeleccionarTalla={(sku) => seleccionarTallaProducto(prod, sku)}
               />
             </View>
           ))}
@@ -1679,17 +1869,100 @@ export function ClienteScreen() {
                     },
                   ]}
                 >
-                  <Text
-                    style={[tipografia.etiqueta, { color: colores.tinta, flex: 1 }]}
-                  >
-                    {item.cantidad}× {item.nombre} ({item.talla})
-                  </Text>
-                  <Text style={[tipografia.micro, { color: colores.tinta }]}>
-                    {formatearCLP((item.precioUnitario ?? 0) * item.cantidad)}
-                  </Text>
+                  <View style={styles.flex}>
+                    <Text
+                      style={[tipografia.etiqueta, { color: colores.tinta }]}
+                    >
+                      {item.cantidad}× {item.nombre} ({item.talla})
+                    </Text>
+                    <Text style={[tipografia.micro, { color: colores.tinta }]}>
+                      {formatearCLP((item.precioUnitario ?? 0) * item.cantidad)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.carritoStepper}>
+                    <Pressable
+                      onPress={() => cambiarCantidadCarrito(item, -1)}
+                      disabled={item.cantidad <= 1}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Quitar una unidad de ${item.nombre}`}
+                      accessibilityState={{ disabled: item.cantidad <= 1 }}
+                      style={({ pressed }) => [
+                        styles.carritoStepperBoton,
+                        {
+                          minWidth: puntoMinimo,
+                          minHeight: puntoMinimo,
+                          borderColor: colores.borde,
+                          backgroundColor: colores.superficie,
+                          opacity:
+                            item.cantidad <= 1 ? 0.4 : pressed ? 0.65 : 1,
+                        },
+                      ]}
+                    >
+                      <Icon name="minus" size={15} color={colores.tinta} />
+                    </Pressable>
+
+                    <Text
+                      style={[
+                        tipografia.micro,
+                        styles.carritoCantidad,
+                        { color: colores.tinta },
+                      ]}
+                    >
+                      {item.cantidad}
+                    </Text>
+
+                    <Pressable
+                      onPress={() => cambiarCantidadCarrito(item, 1)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Agregar una unidad de ${item.nombre}`}
+                      style={({ pressed }) => [
+                        styles.carritoStepperBoton,
+                        {
+                          minWidth: puntoMinimo,
+                          minHeight: puntoMinimo,
+                          borderColor: colores.borde,
+                          backgroundColor: colores.superficie,
+                          opacity: pressed ? 0.65 : 1,
+                        },
+                      ]}
+                    >
+                      <Icon name="plus" size={15} color={colores.tinta} />
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => quitarItemCarrito(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Eliminar ${item.nombre} del carrito`}
+                      style={({ pressed }) => [
+                        styles.carritoStepperBoton,
+                        {
+                          minWidth: puntoMinimo,
+                          minHeight: puntoMinimo,
+                          borderColor: colores.borde,
+                          backgroundColor: colores.superficie,
+                          opacity: pressed ? 0.65 : 1,
+                        },
+                      ]}
+                    >
+                      <Icon name="trash-2" size={16} color={colores.error} />
+                    </Pressable>
+                  </View>
                 </View>
               ))}
             </View>
+
+            {errorCarrito ? (
+              <View style={styles.errorFila}>
+                <Icon name="circle-alert" size={14} color={colores.error} />
+                <Text
+                  accessibilityRole="alert"
+                  style={[tipografia.caption, { color: colores.error, flex: 1 }]}
+                >
+                  {errorCarrito}
+                </Text>
+              </View>
+            ) : null}
 
             <CampoTexto
               etiqueta="Tu nombre"
@@ -1904,6 +2177,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     cursor: "pointer",
   },
+  carritoStepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: ESPACIOS.xs + 2,
+  },
+  carritoStepperBoton: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: RADIOS.sm,
+    borderWidth: 1,
+    cursor: "pointer",
+  },
+  carritoCantidad: {
+    minWidth: 20,
+    textAlign: "center",
+  },
   catalogoGrid: {
     gap: ESPACIOS.md,
   },
@@ -2015,6 +2304,25 @@ const styles = StyleSheet.create({
   cajaEstado: {
     padding: ESPACIOS.md,
     borderWidth: 1,
+    gap: ESPACIOS.xs + 2,
+  },
+  pillCancelado: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
+  },
+  botonCancelarPedido: {
+    alignSelf: "flex-start",
+  },
+  historialEstados: {
+    gap: ESPACIOS.xs,
+    paddingTop: ESPACIOS.xs,
+  },
+  historialFila: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: ESPACIOS.sm,
   },
   panelPrendas: {
     padding: ESPACIOS.md,

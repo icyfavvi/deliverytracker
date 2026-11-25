@@ -83,6 +83,7 @@ export function LocalScreen() {
     recargar,
     crearOrden,
     avanzar,
+    cancelar,
     reponerStock,
     refrescando,
   } = usePedidos();
@@ -390,6 +391,27 @@ export function LocalScreen() {
       }
     },
     [avanzar]
+  );
+
+  // ─── Cancelar orden en estado 'recibido' (revierte stock) ──────
+  const handleCancelarPedido = useCallback(
+    async (codigo: string) => {
+      const resultado = await cancelar(codigo, "Cancelado por bodega");
+      if (!resultado.ok) {
+        setAviso({
+          titulo: "No se pudo cancelar",
+          mensaje: resultado.mensaje ?? "Error de red al cancelar la orden.",
+          tono: "error",
+        });
+        return;
+      }
+      setAviso({
+        titulo: `Orden #${codigo} cancelada`,
+        mensaje: "Las prendas volvieron al stock de bodega.",
+        tono: "exito",
+      });
+    },
+    [cancelar]
   );
 
   const handleCopiarCodigo = useCallback(async (codigo: string) => {
@@ -940,6 +962,7 @@ export function LocalScreen() {
               pedido={pedido}
               onAvanzarEstado={handleAvanzarEstado}
               onCopiarCodigo={handleCopiarCodigo}
+              onCancelarPedido={handleCancelarPedido}
             />
           ))}
           {refrescando ? (
