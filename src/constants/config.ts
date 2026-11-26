@@ -9,6 +9,8 @@
 // secretos o llaves de API deben residir exclusivamente en el servidor y consumirse
 // a través de endpoints autenticados sin prefijo EXPO_PUBLIC_.
 
+export const SESSION_TTL_MS = 86_400_000; // 24 horas en milisegundos
+
 export const CONFIG = {
   env: process.env.EXPO_PUBLIC_APP_ENV ?? "development",
   apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "https://api.vogueatelier.local/v1",

@@ -4,9 +4,14 @@
 // nativo/Expo para poder probar registro, login, roles y sesiones directo
 // en Node.js (`tests/verify-core.ts`) sin depender del runtime de Expo.
 
+import { SESSION_TTL_MS } from "../constants/config";
+
 export const CLAVE_USUARIOS = "@deliverytracker/usuarios";
 export const CLAVE_SESION = "@deliverytracker/sesion";
 export const MIN_CLAVE = 8;
+export const MAX_INTENTOS_LOGIN = 5;
+export const BLOQUEO_LOGIN_MS = 15 * 60 * 1000;
+export const MENSAJE_BLOQUEO_LOGIN = "Demasiados intentos. Espera 15 minutos.";
 
 const ITERACIONES_PBKDF2 = 100_000;
 const ITERACIONES_FALLBACK = 150;
@@ -47,6 +52,8 @@ export interface AuthCryptoAdapter {
 export interface AuthEnvOptions {
   /** Solo en desarrollo se siembra automáticamente `admin` / `admin`. */
   permitirDemoAdmin: boolean;
+  /** Reloj inyectable para pruebas deterministas de expiración y bloqueo. */
+  ahoraMs?: () => number;
 }
 
 export class ErrorAuth extends Error {}
@@ -146,6 +153,11 @@ export function crearServicioAuth(
   env: AuthEnvOptions
 ) {
   let seedAdminPromesa: Promise<void> | null = null;
+  const ahoraMs = env.ahoraMs ?? Date.now;
+  const intentosPorUsuario = new Map<
+    string,
+    { conteo: number; bloqueadoHasta: number | null }
+  >();
 
   async function leerUsuarios(): Promise<UsuarioGuardado[]> {
     try {
@@ -194,7 +206,11 @@ export function crearServicioAuth(
 
   async function abrirSesion(usuario: string, rol: RolUsuario): Promise<Sesion> {
     const sesion: Sesion = { usuario, rol };
-    await storage.setItem(CLAVE_SESION, JSON.stringify(sesion));
+    const sessionExpiry = ahoraMs() + SESSION_TTL_MS;
+    await storage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ ...sesion, sessionExpiry })
+    );
     return sesion;
   }
 
@@ -236,6 +252,14 @@ export function crearServicioAuth(
   async function iniciarSesion(usuario: string, clave: string): Promise<Sesion> {
     await asegurarAdminInicial();
     const nombre = normalizar(usuario);
+    const registro = intentosPorUsuario.get(nombre);
+    if (registro?.bloqueadoHasta !== null && registro?.bloqueadoHasta !== undefined) {
+      if (ahoraMs() < registro.bloqueadoHasta) {
+        throw new ErrorAuth(MENSAJE_BLOQUEO_LOGIN);
+      }
+      intentosPorUsuario.delete(nombre);
+    }
+
     const guardado = (await leerUsuarios()).find((u) => u.usuario === nombre);
     const hash = await derivarHash(
       clave,
@@ -244,8 +268,19 @@ export function crearServicioAuth(
       guardado?.hash
     );
     if (!guardado || hash !== guardado.hash) {
+      const conteo = (intentosPorUsuario.get(nombre)?.conteo ?? 0) + 1;
+      if (conteo >= MAX_INTENTOS_LOGIN) {
+        intentosPorUsuario.set(nombre, {
+          conteo,
+          bloqueadoHasta: ahoraMs() + BLOQUEO_LOGIN_MS,
+        });
+        throw new ErrorAuth(MENSAJE_BLOQUEO_LOGIN);
+      }
+      intentosPorUsuario.set(nombre, { conteo, bloqueadoHasta: null });
       throw new ErrorAuth("Usuario o contraseña incorrectos.");
     }
+
+    intentosPorUsuario.delete(nombre);
     return abrirSesion(nombre, resolverRol(nombre, guardado.rol));
   }
 
@@ -254,8 +289,19 @@ export function crearServicioAuth(
     try {
       const crudo = await storage.getItem(CLAVE_SESION);
       if (!crudo) return null;
-      const parsed = JSON.parse(crudo) as Partial<Sesion>;
+      const parsed = JSON.parse(crudo) as Partial<Sesion> & {
+        sessionExpiry?: unknown;
+      };
       if (!parsed.usuario) return null;
+      if (
+        parsed.sessionExpiry !== undefined &&
+        (typeof parsed.sessionExpiry !== "number" ||
+          !Number.isFinite(parsed.sessionExpiry) ||
+          ahoraMs() > parsed.sessionExpiry)
+      ) {
+        await cerrarSesion();
+        return null;
+      }
       return {
         usuario: parsed.usuario,
         rol: resolverRol(parsed.usuario, parsed.rol),

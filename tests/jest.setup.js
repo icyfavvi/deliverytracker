@@ -40,3 +40,50 @@ if (!globalThis.crypto || !globalThis.crypto.subtle) {
     configurable: true,
   });
 }
+
+// Mock en memoria de expo-secure-store con validación estricta de claves SDK 58
+jest.mock("expo-secure-store", () => {
+  const store = new Map();
+  const validarClave = (key) => {
+    if (typeof key !== "string" || !/^[\w.-]+$/.test(key)) {
+      throw new Error(
+        'Invalid key provided to SecureStore. Keys must not be empty and contain only alphanumeric characters, ".", "-", and "_".'
+      );
+    }
+  };
+  return {
+    isAvailableAsync: jest.fn(async () => true),
+    getItemAsync: jest.fn(async (key) => {
+      validarClave(key);
+      return store.get(key) ?? null;
+    }),
+    setItemAsync: jest.fn(async (key, value) => {
+      validarClave(key);
+      store.set(key, String(value));
+    }),
+    deleteItemAsync: jest.fn(async (key) => {
+      validarClave(key);
+      store.delete(key);
+    }),
+    __clearMockStore: () => store.clear(),
+  };
+});
+
+// Mock seguro de expo-haptics para pruebas unitarias y de componentes
+jest.mock("expo-haptics", () => ({
+  ImpactFeedbackStyle: {
+    Light: "light",
+    Medium: "medium",
+    Heavy: "heavy",
+    Rigid: "rigid",
+    Soft: "soft",
+  },
+  NotificationFeedbackType: {
+    Success: "success",
+    Warning: "warning",
+    Error: "error",
+  },
+  impactAsync: jest.fn(async () => {}),
+  notificationAsync: jest.fn(async () => {}),
+  selectionAsync: jest.fn(async () => {}),
+}));

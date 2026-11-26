@@ -92,7 +92,7 @@ export function ProveedorPedidos({ children }: { children: React.ReactNode }) {
 
   const recargar = useCallback(async () => {
     const seq = ++recargaSeqRef.current;
-    await Promise.resolve();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     if (seq !== recargaSeqRef.current) return;
     setRefrescando(true);
     try {

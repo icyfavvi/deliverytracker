@@ -3,7 +3,7 @@
 // Único botón reutilizable de la app. Garantiza área táctil mínima
 // >= 44x44pt, estados de carga y deshabilitado, y contraste WCAG AA.
 
-import React from "react";
+import React, { useCallback } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -15,8 +15,10 @@ import {
 } from "react-native";
 
 import { Icon, LucideIconName } from "./Icon";
+import { useReducirMovimiento } from "../hooks/useReducirMovimiento";
 import { useTema } from "../theme/ThemeProvider";
 import { ESPACIOS, RADIOS } from "../theme/tokens";
+import { dispararImpactoLigero } from "../utils/haptics";
 
 export type VarianteBoton = "primario" | "secundario" | "fantasma" | "peligro";
 
@@ -50,7 +52,13 @@ export function Boton({
   style,
 }: Props) {
   const { colores, tipografia, puntoMinimo } = useTema();
+  const reducirMovimiento = useReducirMovimiento();
   const inactivo = deshabilitado || cargando;
+
+  const manejarPress = useCallback(() => {
+    void dispararImpactoLigero(reducirMovimiento);
+    onPress();
+  }, [onPress, reducirMovimiento]);
 
   const fondo =
     variante === "primario"
@@ -72,7 +80,7 @@ export function Boton({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={manejarPress}
       disabled={inactivo}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? etiqueta}

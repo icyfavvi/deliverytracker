@@ -166,7 +166,12 @@ function generarCodigo(): string {
   return "O" + Math.random().toString(36).substring(2, 5).toUpperCase();
 }
 
+const ES_DEV = typeof __DEV__ !== "undefined" ? __DEV__ : false;
+const MOCK_LATENCY_ENABLED =
+  ES_DEV && !process.env.EXPO_PUBLIC_SKIP_LATENCY;
+
 function simularLatencia(): Promise<void> {
+  if (!MOCK_LATENCY_ENABLED) return Promise.resolve();
   const ms = 80 + Math.random() * 150;
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

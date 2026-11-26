@@ -1,5 +1,7 @@
 // ─── Contexto de sesión ──────────────────────────────────────────
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
 import React, {
   createContext,
   useCallback,
@@ -9,8 +11,11 @@ import React, {
   useState,
 } from "react";
 
+import { SESSION_TTL_MS } from "../constants/config";
 import * as auth from "../services/authLocal";
 import type { Sesion } from "../services/authLocal";
+
+export const CLAVE_SESSION_EXPIRY = "@deliverytracker/session_expiry";
 
 interface ValorAuth {
   sesion: Sesion | null;
@@ -28,25 +33,65 @@ export function ProveedorAuth({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let activo = true;
-    auth.leerSesion().then((s) => {
-      if (activo) {
-        setSesion(s);
-        setCargando(false);
+    (async () => {
+      try {
+        const expRaw = await AsyncStorage.getItem(CLAVE_SESSION_EXPIRY);
+        const expNum = expRaw !== null ? Number(expRaw) : null;
+        if (expNum !== null && Number.isFinite(expNum) && Date.now() > expNum) {
+          await auth.cerrarSesion();
+          await AsyncStorage.removeItem(CLAVE_SESSION_EXPIRY);
+          if (activo) {
+            setSesion(null);
+            setCargando(false);
+          }
+          try {
+            router.replace("/");
+          } catch {
+            // Router aún no montado en tests unitarios
+          }
+          return;
+        }
+        const s = await auth.leerSesion();
+        if (activo) {
+          setSesion(s);
+          setCargando(false);
+        }
+      } catch {
+        if (activo) {
+          setSesion(null);
+          setCargando(false);
+        }
       }
-    });
+    })();
     return () => {
       activo = false;
     };
   }, []);
 
-  const entrar = useCallback(async (u: string, c: string) => {
-    setSesion(await auth.iniciarSesion(u, c));
+  const guardarExpiracion = useCallback(async () => {
+    const sessionExpiry = Date.now() + SESSION_TTL_MS;
+    await AsyncStorage.setItem(CLAVE_SESSION_EXPIRY, String(sessionExpiry));
   }, []);
-  const registrarse = useCallback(async (u: string, c: string) => {
-    setSesion(await auth.registrar(u, c));
-  }, []);
+
+  const entrar = useCallback(
+    async (u: string, c: string) => {
+      const nueva = await auth.iniciarSesion(u, c);
+      await guardarExpiracion();
+      setSesion(nueva);
+    },
+    [guardarExpiracion]
+  );
+  const registrarse = useCallback(
+    async (u: string, c: string) => {
+      const nueva = await auth.registrar(u, c);
+      await guardarExpiracion();
+      setSesion(nueva);
+    },
+    [guardarExpiracion]
+  );
   const salir = useCallback(async () => {
     await auth.cerrarSesion();
+    await AsyncStorage.removeItem(CLAVE_SESSION_EXPIRY).catch(() => {});
     setSesion(null);
   }, []);
 
